@@ -120,7 +120,6 @@ static DWORD WINAPI clicker_worker_thread(LPVOID param) {
         int hotkey_is_down = (GetAsyncKeyState(g_state.hotkey_vk) & 0x8000) != 0;
 
         if (g_state.hold_mode) {
-            // Hold mode
             if (hotkey_is_down != g_state.is_active) {
                 g_state.is_active = hotkey_is_down;
                 if (g_state.sound_enabled && g_state.is_active) {
@@ -129,7 +128,6 @@ static DWORD WINAPI clicker_worker_thread(LPVOID param) {
                 if (g_state.hwnd) InvalidateRect(g_state.hwnd, NULL, FALSE);
             }
         } else {
-            // Toggle mode
             if (hotkey_is_down && !hotkey_was_down) {
                 g_state.is_active = !g_state.is_active;
                 if (g_state.sound_enabled) {
@@ -220,14 +218,16 @@ static void draw_rounded_card(Graphics* g, Brush* brush, Pen* pen, float x, floa
 static void draw_switch(Graphics* g, float x, float y, bool on) {
     float w = 34.0f;
     float h = 18.0f;
-    Color bgColor = on ? Color(255, 16, 185, 129) : Color(255, 45, 50, 60);
+    // Strict monochrome: White when ON, Dark zinc when OFF
+    Color bgColor = on ? Color(255, 255, 255, 255) : Color(255, 39, 39, 44);
     SolidBrush bg(bgColor);
     fill_rounded_card(g, &bg, x, y, w, h, 9.0f);
 
     float knobR = 6.5f;
     float knobX = on ? (x + w - knobR - 2.5f) : (x + knobR + 2.5f);
     float knobY = y + (h / 2.0f);
-    SolidBrush knobBrush(Color(255, 255, 255, 255));
+    Color knobColor = on ? Color(255, 9, 9, 11) : Color(255, 161, 161, 170);
+    SolidBrush knobBrush(knobColor);
     g->FillEllipse(&knobBrush, knobX - knobR, knobY - knobR, knobR * 2.0f, knobR * 2.0f);
 }
 
@@ -250,32 +250,22 @@ static void on_paint(HWND hwnd) {
         g.SetTextRenderingHint(TextRenderingHintAntiAlias);
         g.SetInterpolationMode(InterpolationModeHighQualityBicubic);
 
-        // 1. Base Slate #0c0e12
-        SolidBrush bgBrush(Color(255, 12, 14, 18));
+        // 1. Strict promotezz Monochrome Base: #09090b (Deep Zinc 950)
+        SolidBrush bgBrush(Color(255, 9, 9, 11));
         g.FillRectangle(&bgBrush, 0, 0, width, height);
 
-        // Ambient radial emerald hero glow behind center
-        GraphicsPath glowPath;
-        glowPath.AddEllipse(20.0f, 20.0f, (float)(width - 40), (float)(height - 40));
-        PathGradientBrush pgb(&glowPath);
-        pgb.SetCenterColor(Color(25, 16, 185, 129));
-        Color surroundColors[] = { Color(0, 12, 14, 18) };
-        int count = 1;
-        pgb.SetSurroundColors(surroundColors, &count);
-        g.FillPath(&pgb, &glowPath);
-
-        // Top Header Bar
+        // Header Bar #121215
         float headerH = 46.0f;
-        SolidBrush headerBg(Color(255, 16, 19, 24));
+        SolidBrush headerBg(Color(255, 18, 18, 21));
         Pen sepPen(Color(35, 255, 255, 255), 1.0f);
         g.FillRectangle(&headerBg, 0, 0, width, (int)headerH);
         g.DrawLine(&sepPen, 0.0f, headerH, (float)width, headerH);
 
         // Outer window border
-        Pen winBorder(Color(45, 255, 255, 255), 1.0f);
+        Pen winBorder(Color(40, 255, 255, 255), 1.0f);
         g.DrawRectangle(&winBorder, 0, 0, width - 1, height - 1);
 
-        // Fonts
+        // Typography (Segoe UI)
         FontFamily ffSegoe(L"Segoe UI");
         FontFamily ffConsolas(L"Consolas");
         Gdiplus::Font fontLogo(&ffSegoe, 11.5f, FontStyleBold, UnitPoint);
@@ -287,14 +277,17 @@ static void on_paint(HWND hwnd) {
         Gdiplus::Font fontMono(&ffConsolas, 10.5f, FontStyleBold, UnitPoint);
         Gdiplus::Font fontBtn(&ffSegoe, 10.5f, FontStyleBold, UnitPoint);
 
-        // Brushes
+        // Pure Monochrome Palette
         SolidBrush whiteBrush(Color(255, 255, 255, 255));
-        SolidBrush darkBrush(Color(255, 12, 14, 18));
+        SolidBrush darkBrush(Color(255, 9, 9, 11));
+        SolidBrush zinc200(Color(255, 228, 228, 231));
         SolidBrush zinc300(Color(255, 212, 212, 216));
         SolidBrush zinc400(Color(255, 161, 161, 170));
         SolidBrush zinc500(Color(255, 113, 113, 122));
-        SolidBrush emerald(Color(255, 16, 185, 129));
-        SolidBrush cardBg(Color(255, 18, 22, 28));
+        SolidBrush zinc600(Color(255, 82, 82, 91));
+
+        // Cards: Translucent zinc surface with subtle white border
+        SolidBrush cardBg(Color(255, 18, 18, 22));
         Pen cardBorder(Color(32, 255, 255, 255), 1.0f);
 
         StringFormat sfC;
@@ -309,26 +302,27 @@ static void on_paint(HWND hwnd) {
         sfR.SetAlignment(StringAlignmentFar);
         sfR.SetLineAlignment(StringAlignmentCenter);
 
-        // Header: Pulsing dot + promotezz clicker + FREE badge
+        // Header: Pulsing monochrome status dot + promotezz clicker + FREE badge
         float logoX = 18.0f;
         float logoY = 12.0f;
 
-        Color dotColor = g_state.is_active ? Color(255, 16, 185, 129) : Color(140, 113, 113, 122);
+        Color dotColor = g_state.is_active ? Color(255, 255, 255, 255) : Color(140, 113, 113, 122);
         SolidBrush dotBrush(dotColor);
         g.FillEllipse(&dotBrush, logoX, logoY + 7.0f, 8.0f, 8.0f);
 
         if (g_state.is_active) {
-            Pen dotGlow(Color(80, 16, 185, 129), 2.0f);
+            Pen dotGlow(Color(80, 255, 255, 255), 2.0f);
             g.DrawEllipse(&dotGlow, logoX - 1.5f, logoY + 5.5f, 11.0f, 11.0f);
         }
 
         g.DrawString(L"promotezz", -1, &fontLogo, RectF(logoX + 16.0f, logoY, 82.0f, 22.0f), &sfL, &whiteBrush);
         g.DrawString(L"clicker", -1, &fontLogoSub, RectF(logoX + 96.0f, logoY, 56.0f, 22.0f), &sfL, &zinc400);
 
-        SolidBrush verBg(Color(30, 16, 185, 129));
-        Pen verBorder(Color(60, 16, 185, 129), 1.0f);
+        // FREE Badge (Monochrome white/10 pill)
+        SolidBrush verBg(Color(25, 255, 255, 255));
+        Pen verBorder(Color(50, 255, 255, 255), 1.0f);
         draw_rounded_card(&g, &verBg, &verBorder, logoX + 154.0f, logoY + 2.0f, 58.0f, 18.0f, 9.0f);
-        g.DrawString(L"FREE", -1, &fontBadge, RectF(logoX + 154.0f, logoY + 2.0f, 58.0f, 18.0f), &sfC, &emerald);
+        g.DrawString(L"FREE", -1, &fontBadge, RectF(logoX + 154.0f, logoY + 2.0f, 58.0f, 18.0f), &sfC, &whiteBrush);
 
         // Window Controls (Right of Header)
         SolidBrush ctrlBg(Color(25, 255, 255, 255));
@@ -338,7 +332,7 @@ static void on_paint(HWND hwnd) {
         g.DrawString(L"✕", -1, &fontSub, RectF((float)g_btn_close_rect.left, (float)g_btn_close_rect.top, 24.0f, 22.0f), &sfC, &zinc400);
 
         // ==========================================
-        // DUAL COLUMN CLIENT INTERFACE
+        // DUAL COLUMN INTERFACE (Promotezz Monochrome)
         // ==========================================
         float colY = headerH + 16.0f;
         float colGap = 16.0f;
@@ -351,13 +345,15 @@ static void on_paint(HWND hwnd) {
         draw_rounded_card(&g, &cardBg, &cardBorder, col1X, colY, colW, card1H, 12.0f);
         g.DrawString(L"Click Speed", -1, &fontCardTitle, RectF(col1X + 14.0f, colY + 12.0f, 110.0f, 20.0f), &sfL, &whiteBrush);
 
+        // Monochrome Speed Value Badge
         wchar_t cpsStr[32];
         swprintf_s(cpsStr, 32, L"%.1f CPS", g_state.target_cps);
-        SolidBrush badgeBg(Color(30, 16, 185, 129));
-        Pen badgeBorder(Color(70, 16, 185, 129), 1.0f);
+        SolidBrush badgeBg(Color(30, 255, 255, 255));
+        Pen badgeBorder(Color(60, 255, 255, 255), 1.0f);
         draw_rounded_card(&g, &badgeBg, &badgeBorder, col1X + colW - 86.0f, colY + 10.0f, 72.0f, 24.0f, 12.0f);
-        g.DrawString(cpsStr, -1, &fontMono, RectF(col1X + colW - 86.0f, colY + 10.0f, 72.0f, 24.0f), &sfC, &emerald);
+        g.DrawString(cpsStr, -1, &fontMono, RectF(col1X + colW - 86.0f, colY + 10.0f, 72.0f, 24.0f), &sfC, &whiteBrush);
 
+        // Slider Track
         float trackX = col1X + 14.0f;
         float trackY = colY + 54.0f;
         float trackW = colW - 28.0f;
@@ -368,7 +364,7 @@ static void on_paint(HWND hwnd) {
         g_slider_rect.top = (LONG)(trackY - 6.0f);
         g_slider_rect.bottom = (LONG)(trackY + trackH + 6.0f);
 
-        SolidBrush railBg(Color(255, 35, 40, 50));
+        SolidBrush railBg(Color(255, 39, 39, 44));
         fill_rounded_card(&g, &railBg, trackX, trackY, trackW, trackH, 2.5f);
 
         double pct = (g_state.target_cps - 6.0) / (24.0 - 6.0);
@@ -407,14 +403,15 @@ static void on_paint(HWND hwnd) {
         g_btn_seg_btn_rect.top = (LONG)segY;
         g_btn_seg_btn_rect.bottom = (LONG)(segY + segH);
 
-        SolidBrush segActive(Color(45, 255, 255, 255));
+        // Monochrome active pill: White background with black text
+        SolidBrush segActiveWhite(Color(255, 255, 255, 255));
         if (!g_state.right_click_mode) {
-            fill_rounded_card(&g, &segActive, segX, segY, segW, segH, 13.0f);
+            fill_rounded_card(&g, &segActiveWhite, segX, segY, segW, segH, 13.0f);
         } else {
-            fill_rounded_card(&g, &segActive, segX + segW + 4.0f, segY, segW, segH, 13.0f);
+            fill_rounded_card(&g, &segActiveWhite, segX + segW + 4.0f, segY, segW, segH, 13.0f);
         }
-        g.DrawString(L"Left", -1, &fontSub, RectF(segX, segY, segW, segH), &sfC, !g_state.right_click_mode ? &whiteBrush : &zinc500);
-        g.DrawString(L"Right", -1, &fontSub, RectF(segX + segW + 4.0f, segY, segW, segH), &sfC, g_state.right_click_mode ? &whiteBrush : &zinc500);
+        g.DrawString(L"Left", -1, &fontSub, RectF(segX, segY, segW, segH), &sfC, !g_state.right_click_mode ? &darkBrush : &zinc500);
+        g.DrawString(L"Right", -1, &fontSub, RectF(segX + segW + 4.0f, segY, segW, segH), &sfC, g_state.right_click_mode ? &darkBrush : &zinc500);
 
         Pen divPen(Color(25, 255, 255, 255), 1.0f);
         g.DrawLine(&divPen, col1X + 14.0f, card2Y + 56.0f, col1X + colW - 14.0f, card2Y + 56.0f);
@@ -427,12 +424,12 @@ static void on_paint(HWND hwnd) {
         g_btn_seg_trig_rect.bottom = (LONG)(seg2Y + segH);
 
         if (!g_state.hold_mode) {
-            fill_rounded_card(&g, &segActive, segX, seg2Y, segW, segH, 13.0f);
+            fill_rounded_card(&g, &segActiveWhite, segX, seg2Y, segW, segH, 13.0f);
         } else {
-            fill_rounded_card(&g, &segActive, segX + segW + 4.0f, seg2Y, segW, segH, 13.0f);
+            fill_rounded_card(&g, &segActiveWhite, segX + segW + 4.0f, seg2Y, segW, segH, 13.0f);
         }
-        g.DrawString(L"Toggle", -1, &fontSub, RectF(segX, seg2Y, segW, segH), &sfC, !g_state.hold_mode ? &whiteBrush : &zinc500);
-        g.DrawString(L"Hold", -1, &fontSub, RectF(segX + segW + 4.0f, seg2Y, segW, segH), &sfC, g_state.hold_mode ? &whiteBrush : &zinc500);
+        g.DrawString(L"Toggle", -1, &fontSub, RectF(segX, seg2Y, segW, segH), &sfC, !g_state.hold_mode ? &darkBrush : &zinc500);
+        g.DrawString(L"Hold", -1, &fontSub, RectF(segX + segW + 4.0f, seg2Y, segW, segH), &sfC, g_state.hold_mode ? &darkBrush : &zinc500);
 
         // COLUMN 2: CARD 3 (TOGGLES & BIND)
         float card3H = 240.0f;
@@ -497,7 +494,7 @@ static void on_paint(HWND hwnd) {
         float dockH = 34.0f;
 
         // Telemetry Pill (Left)
-        SolidBrush statBg(Color(255, 16, 20, 26));
+        SolidBrush statBg(Color(255, 18, 18, 22));
         Pen statBorder(Color(25, 255, 255, 255), 1.0f);
         draw_rounded_card(&g, &statBg, &statBorder, col1X, dockY, colW, dockH, 10.0f);
 
@@ -509,17 +506,18 @@ static void on_paint(HWND hwnd) {
         float thirdW = colW / 3.0f;
         g.DrawString(clicksBuf, -1, &fontMono, RectF(col1X, dockY, thirdW, dockH), &sfC, &zinc400);
         g.DrawString(liveBuf, -1, &fontMono, RectF(col1X + thirdW, dockY, thirdW, dockH), &sfC, &zinc400);
-        g.DrawString(ramBuf, -1, &fontMono, RectF(col1X + (thirdW * 2.0f), dockY, thirdW, dockH), &sfC, &emerald);
+        g.DrawString(ramBuf, -1, &fontMono, RectF(col1X + (thirdW * 2.0f), dockY, thirdW, dockH), &sfC, &whiteBrush);
 
-        // Start Button Pill (Right)
+        // Start Button Pill (Right) - Signature promotezz.cc pill button
         g_btn_toggle_rect.left = (LONG)col2X;
         g_btn_toggle_rect.right = (LONG)(col2X + colW);
         g_btn_toggle_rect.top = (LONG)dockY;
         g_btn_toggle_rect.bottom = (LONG)(dockY + dockH);
 
         if (g_state.is_active) {
-            SolidBrush activeBtn(Color(255, 225, 29, 72));
-            fill_rounded_card(&g, &activeBtn, col2X, dockY, colW, dockH, 17.0f);
+            SolidBrush activeBtn(Color(255, 18, 18, 22));
+            Pen activeRing(Color(255, 255, 255, 255), 1.5f);
+            draw_rounded_card(&g, &activeBtn, &activeRing, col2X, dockY, colW, dockH, 17.0f);
             g.DrawString(L"STOP CLICKER (F6)", -1, &fontBtn, RectF(col2X, dockY, colW, dockH), &sfC, &whiteBrush);
         } else {
             fill_rounded_card(&g, &whiteBrush, col2X, dockY, colW, dockH, 17.0f);
@@ -685,7 +683,9 @@ void prmtz_gui_init(double initial_cps) {
     wc.hCursor = LoadCursorA(NULL, IDC_ARROW);
     wc.hbrBackground = NULL;
     wc.lpszClassName = "PrmtzAutoClickerClass";
-    RegisterClassExA(&wc);
+    ATOM atom = RegisterClassExA(&wc);
+    printf("[prmtz] RegisterClassExA returned atom: %u (GetLastError: %lu)\n", (unsigned int)atom, GetLastError());
+    fflush(stdout);
 
     int w = 560;
     int h = 370;
@@ -702,6 +702,9 @@ void prmtz_gui_init(double initial_cps) {
         pos_x, pos_y, w, h,
         NULL, NULL, hInstance, NULL
     );
+
+    printf("[prmtz] CreateWindowExA returned: %p (GetLastError: %lu)\n", (void*)hwnd, GetLastError());
+    fflush(stdout);
 
     g_state.hwnd = hwnd;
 

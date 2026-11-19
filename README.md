@@ -10,10 +10,10 @@ A modern, zero-overhead systems autoclicker engineered for competitive performan
 
 <br />
 
-[![RAM Footprint](https://img.shields.io/badge/RAM-%3C%203.2%20MB-10b981?style=flat-square)](https://store.promotezz.cc)
-[![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-black?style=flat-square)](https://promotezz.cc)
-[![Speed](https://img.shields.io/badge/Speed-6--24%20CPS-blue?style=flat-square)](https://store.promotezz.cc)
-[![License](https://img.shields.io/badge/License-MIT-white?style=flat-square)](https://opensource.org/licenses/MIT)
+[![RAM Footprint](https://img.shields.io/badge/RAM-%3C%203.2%20MB-09090b?style=flat-square)](https://store.promotezz.cc)
+[![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-09090b?style=flat-square)](https://promotezz.cc)
+[![Speed](https://img.shields.io/badge/Speed-6--24%20CPS-09090b?style=flat-square)](https://store.promotezz.cc)
+[![License](https://img.shields.io/badge/License-MIT-09090b?style=flat-square)](https://opensource.org/licenses/MIT)
 
 </div>
 
