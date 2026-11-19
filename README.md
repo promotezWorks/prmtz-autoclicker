@@ -6,7 +6,7 @@ A sleek, zero-overhead Win32 autoclicker built for competitive gaming. Runs at u
 
 <br />
 
-<img src="preview.png" alt="promotezz autoclicker" width="480" />
+<img src="assets/preview.png" alt="promotezz autoclicker" width="720" />
 
 <br />
 
