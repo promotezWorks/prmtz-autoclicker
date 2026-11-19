@@ -1,2 +1,3 @@
+c_sources = ["gui.cpp"];
 c_headers = ["gui.h"];
-c_libs_windows = ["user32", "gdi32", "winmm", "dwmapi", "psapi"];
+c_libs_windows = ["user32", "gdi32", "winmm", "dwmapi", "psapi", "gdiplus"];
