@@ -3,7 +3,6 @@
 *.obj
 *.lib
 *.exp
-*.ilk
 *.pdb
 *.c
 *.log
@@ -11,6 +10,9 @@
 # Goose build cache
 .goose/
 build/
+
+# Internal agent rules & metadata
+.agents/
 
 # OS files
 Thumbs.db
