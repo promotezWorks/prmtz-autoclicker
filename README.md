@@ -1,63 +1,71 @@
 <div align="center">
 
-# promotezz autoclicker
+# promotezz AutoClicker
 
-A modern, zero-overhead systems autoclicker engineered for competitive performance and low latency. Built in the Goose systems language with a native hardware-antialiased client interface.
-
-<br />
-
-<img src="assets/clicker-preview.png" alt="promotezz autoclicker" width="760" />
+A high-performance systems auto-clicker engineered for sub-millisecond precision and zero overhead. Built natively in the **Goose programming language** (`aardappel`) with pure high-contrast `#000000` Black and `#ffffff` White themes.
 
 <br />
 
-[![RAM Footprint](https://img.shields.io/badge/RAM-%3C%203.2%20MB-09090b?style=flat-square)](https://store.promotezz.cc)
-[![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-09090b?style=flat-square)](https://promotezz.cc)
-[![Speed](https://img.shields.io/badge/Speed-6--24%20CPS-09090b?style=flat-square)](https://store.promotezz.cc)
-[![License](https://img.shields.io/badge/License-MIT-09090b?style=flat-square)](https://opensource.org/licenses/MIT)
+### Black on White (Light Theme)
+<img src="assets/blur_light_preview.png" alt="promotezz AutoClicker — Black on White" width="720" />
+
+<br />
+
+### White on Black (Dark Theme)
+<img src="assets/blur_dark_preview.png" alt="promotezz AutoClicker — White on Black" width="720" />
+
+<br />
+
+[![RAM Footprint](https://img.shields.io/badge/RAM-%3C%203.9%20MB-000000?style=flat-square)](https://store.promotezz.cc)
+[![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-000000?style=flat-square)](https://promotezz.cc)
+[![Speed](https://img.shields.io/badge/Speed-1--50%20CPS-000000?style=flat-square)](https://store.promotezz.cc)
+[![Engine](https://img.shields.io/badge/Engine-Goose%20v2026.4-000000?style=flat-square)](https://github.com/aardappel/goose)
+[![License](https://img.shields.io/badge/License-MIT-000000?style=flat-square)](https://opensource.org/licenses/MIT)
 
 </div>
 
 ---
 
-## Features
+## Highlights
 
-- ⚡ **Sub-Millisecond Win32 Engine** — Bare-metal `SendInput` event streaming with hardware clock resolution (`timeBeginPeriod(1)`).
-- 🎯 **Smooth 6.0 – 24.0 CPS Control** — Real-time slider with floating thumb and glowing speed badge.
-- 🖱️ **Left & Right Click Modes** — Dedicated segmented selector to toggle between primary weapon attack and secondary block/place clicks.
-- 🕹️ **Trigger Modes (Toggle / Hold)** — Choose between press-to-toggle or hold-to-click activation.
-- 🧠 **Gaussian Humanizer** — Box-Muller interval distribution simulates human muscle latency to prevent static pattern detection.
-- ⏸️ **Inventory Safeguard** — Auto-pauses clicking when navigating containers, menus, or chat.
-- 🪶 **Under 3.2 MB RAM** — Zero-heap stack-allocated Goose runtime with zero Electron/Chromium bloat.
-- ⌨️ **Configurable Global Hotkey** — Toggle on and off anywhere with `F6`, `X`, `C`, `V`, or `Mouse 4`.
-- 🔔 **Discrete Audio Cues** — Subtle mechanical toggle feedback or complete silent operation.
+- ⚡ **Goose Systems Language Core** — Compiled to a single standalone Win32 binary. No Node.js, no Chromium, and zero Webview2 bloat.
+- 🪶 **< 3.9 MB RAM** — While Webview2 alternatives consume 100–200 MB, promotezz AutoClicker runs at under 4 MB working set.
+- 🌓 **Dynamic Theme Switching** — Toggle instantly between **Black-on-White** (Light) and **White-on-#000000-Black** (Dark) with the footer button or gear icon.
+- 🎯 **Accurate Click Rate Engine** — Bare-metal `SendInput` event streaming with sub-millisecond hardware resolution (`timeBeginPeriod(1)`).
+- 🖱️ **Multi-Button Support** — Left, Middle, and Right mouse button targeting.
+- 🕹️ **Toggle & Hold Modes** — Seamless switching between press-to-toggle and press-and-hold activation.
+- ⏱️ **Duty Cycle Calibration** — Adjust active down-time per click cycle (30%, 45%, 60%, 75%).
+- 🎲 **Gaussian Speed Randomization** — Box-Muller interval distribution simulates human muscle latency (0%, 15%, 35%, 50%).
+- ⌨️ **Configurable Global Hotkey** — Default `F6`, rebindable to `X`, `C`, `V`, or `Mouse 4`.
+- 🔔 **Subtle Audio Cues** — Mechanical toggle cues with full mute capability.
 
 ---
 
-## How to Use
+## Controls
 
-1. Run `prmtz-autoclicker.exe`.
-2. Configure your desired CPS, click button (Left/Right), and trigger type (Toggle/Hold).
-3. Press **`F6`** (or your bound key) to start clicking.
-
-### Controls
-
-| Option | Description |
-| :--- | :--- |
-| **Click Speed** | Drag the slider between `6.0` and `24.0 CPS` |
-| **Click Button** | Switch between `Left` and `Right` mouse buttons |
-| **Trigger Type** | Switch between `Toggle` (press once) and `Hold` (hold down) |
-| **Gaussian Jitter** | Turn on humanized interval variance |
-| **Click Audio** | Enable or mute audio toggle chimes |
-| **Hotkey Bind** | Click to cycle bind key: `F6` → `X` → `C` → `V` → `Mouse 4` |
+| Control | Description | Interaction |
+| :--- | :--- | :--- |
+| **Speed Box** | Sets target clicks per second | Left-click to increment / cycle presets, Right-click to decrease |
+| **Clicks Per / Unit** | Unit selection | Displays rate in Clicks Per Second |
+| **Hotkey Box** | Global activation trigger key | Click to cycle: `F6` → `X` → `C` → `V` → `Mouse 4` |
+| **Trigger Dropdown** | Activation behavior | Click to switch between `Toggle ▾` and `Hold ▾` |
+| **Button Selector** | Target mouse button | Click `LEFT`, `MIDDLE`, or `RIGHT` |
+| **Duty Cycle** | Click hold duration percentage | Click to cycle: `30%` → `45%` → `60%` → `75%` |
+| **Speed Randomization** | Interval variance | Click to cycle: `0%` → `15%` → `35%` → `50%` |
+| **Theme Toggle** | Theme switcher | Click `☀️ Light` / `🌙 Dark` in footer to toggle |
+| **Audio Status** | Sound feedback | Click speaker icon in footer to mute / unmute |
+| **Window Controls** | Minimize and Close | Vector-drawn controls in title bar |
 
 ---
 
 ## Download
 
-Download the standalone executable directly from **[store.promotezz.cc](https://store.promotezz.cc)**.
+Get the standalone executable directly from **[store.promotezz.cc](https://store.promotezz.cc)** or build from source using Goose:
+
+```bash
+goose build src/main.goose -o prmtz-autoclicker.exe
+```
 
 ---
 
-## License
-
-MIT © [promotezz](https://promotezz.cc) — Free & Open Source.
+*promotezz · Engineered for peak systems performance*

@@ -44,9 +44,9 @@ fn print_banner(cfg: const ClickerConfig&) {
 
 fn main() {
     let cfg = ClickerConfig {
-        default_cps: 14.0,
-        min_cps: 6.0,
-        max_cps: 24.0,
+        default_cps: 25.0,
+        min_cps: 1.0,
+        max_cps: 50.0,
         humanized_jitter: true,
     };
 

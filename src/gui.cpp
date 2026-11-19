@@ -35,25 +35,29 @@ typedef struct {
     int is_active;
     int hotkey_vk;
     int sound_enabled;
-    int jitter_enabled;
-    int right_click_mode;
-    int hold_mode;
+    int speed_rand_pct;     /* 0, 15, 35, 50 % */
+    int duty_cycle_pct;     /* 30, 45, 60, 75 % */
+    int button_mode;        /* 0 = Left, 1 = Middle, 2 = Right */
+    int hold_mode;          /* 0 = Toggle, 1 = Hold */
+    int is_dark_mode;       /* 0 = Black-on-White (Light), 1 = White-on-000000-Black (Dark) */
     long long total_clicks;
     double current_live_cps;
     double ram_mb;
     HWND hwnd;
     HANDLE click_thread;
     int should_exit;
-} PrmtzClickerState;
+} BlurClickerState;
 
-static PrmtzClickerState g_state = {
-    14.0,       /* target_cps */
+static BlurClickerState g_state = {
+    25.0,       /* target_cps (matching BlurAutoClicker default 25 CPS) */
     0,          /* is_active */
     VK_F6,      /* hotkey_vk */
     1,          /* sound_enabled */
-    1,          /* jitter_enabled */
-    0,          /* right_click_mode (0=Left, 1=Right) */
+    35,         /* speed_rand_pct (matching Blur 35%) */
+    45,         /* duty_cycle_pct (matching Blur 45%) */
+    0,          /* button_mode (0=Left, 1=Middle, 2=Right) */
     0,          /* hold_mode (0=Toggle, 1=Hold) */
+    0,          /* is_dark_mode (0 = Black-on-White default, toggleable to 1 = White-on-Black) */
     0,          /* total_clicks */
     0.0,        /* current_live_cps */
     0.2,        /* ram_mb */
@@ -69,28 +73,33 @@ static const char* HOTKEY_NAMES[] = { "F6", "X", "C", "V", "M4" };
 static const int HOTKEY_COUNT = 5;
 static int g_hotkey_idx = 0;
 
-/* Window Metrics: 540 x 445 */
-static const int WIN_WIDTH = 540;
-static const int WIN_HEIGHT = 445;
-
-static int g_is_dragging_slider = 0;
+/* Window Metrics: 720 x 210 Landscape form factor identical to BlurAutoClicker */
+static const int WIN_WIDTH  = 720;
+static const int WIN_HEIGHT = 210;
 
 /* Interactive Hit Rectangles */
-static RECT g_slider_rect       = { 34, 156, 502, 168 };
-static RECT g_btn_toggle_rect   = { 18, 383, 522, 425 };
-static RECT g_btn_seg_btn_rect  = { 164, 218, 256, 242 };
-static RECT g_btn_seg_trig_rect = { 164, 278, 256, 302 };
-static RECT g_sw_jitter_rect    = { 474, 216, 508, 234 };
-static RECT g_sw_audio_rect     = { 474, 256, 508, 274 };
-static RECT g_btn_bind_rect     = { 462, 296, 508, 318 };
-static RECT g_btn_close_rect    = { 512, 14, 534, 38 };
-static RECT g_btn_min_rect      = { 486, 14, 508, 38 };
-static RECT g_pill_dash_rect    = { 368, 14, 472, 42 };
-static RECT g_island_rect       = { 190, 12, 350, 44 };
+static RECT g_rect_gear         = { 14, 8, 38, 32 };
+static RECT g_rect_mouse_btn    = { 42, 8, 70, 32 };
+static RECT g_rect_pin          = { 638, 8, 660, 32 };
+static RECT g_rect_min          = { 666, 8, 688, 32 };
+static RECT g_rect_close        = { 692, 8, 714, 32 };
 
-/* Preset Buttons: 10, 12, 14, 18, 22 */
-static RECT g_preset_rects[5];
-static const double PRESET_VALUES[5] = { 10.0, 12.0, 14.0, 18.0, 22.0 };
+/* Row 1 */
+static RECT g_rect_cps_box      = { 14, 54, 74, 100 };
+static RECT g_rect_rate_drop    = { 284, 54, 404, 100 };
+static RECT g_rect_hotkey_box   = { 416, 54, 561, 100 };
+static RECT g_rect_trigger_box  = { 561, 54, 706, 100 };
+
+/* Row 2 */
+static RECT g_rect_btn_left     = { 104, 122, 158, 152 };
+static RECT g_rect_btn_mid      = { 160, 122, 214, 152 };
+static RECT g_rect_btn_right    = { 216, 122, 270, 152 };
+static RECT g_rect_duty_cycle   = { 296, 114, 476, 160 };
+static RECT g_rect_speed_rand   = { 488, 114, 706, 160 };
+
+/* Footer */
+static RECT g_rect_audio        = { 14, 184, 250, 208 };
+static RECT g_rect_theme_toggle = { 545, 186, 625, 206 };
 
 /* Gaussian random generator (Box-Muller) */
 static double generate_gaussian_jitter(double std_dev) {
@@ -160,16 +169,17 @@ static DWORD WINAPI clicker_worker_thread(LPVOID param) {
 
         if (g_state.is_active) {
             double target = g_state.target_cps;
-            if (target < 6.0) target = 6.0;
-            if (target > 24.0) target = 24.0;
+            if (target < 1.0) target = 1.0;
+            if (target > 100.0) target = 100.0;
 
             double base_interval_sec = 1.0 / target;
             double jitter_sec = 0.0;
-            if (g_state.jitter_enabled) {
-                jitter_sec = generate_gaussian_jitter(base_interval_sec * 0.12);
+            if (g_state.speed_rand_pct > 0) {
+                double pct = (double)g_state.speed_rand_pct / 100.0;
+                jitter_sec = generate_gaussian_jitter(base_interval_sec * pct * 0.4);
             }
             double total_delay_sec = base_interval_sec + jitter_sec;
-            if (total_delay_sec < 0.038) total_delay_sec = 0.038;
+            if (total_delay_sec < 0.010) total_delay_sec = 0.010;
 
             double elapsed_since_click = (double)(t_now.QuadPart - t_last_click.QuadPart) / (double)freq.QuadPart;
 
@@ -177,14 +187,26 @@ static DWORD WINAPI clicker_worker_thread(LPVOID param) {
                 INPUT inputs[2];
                 ZeroMemory(inputs, sizeof(inputs));
 
-                DWORD down_flag = g_state.right_click_mode ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_LEFTDOWN;
-                DWORD up_flag = g_state.right_click_mode ? MOUSEEVENTF_RIGHTUP : MOUSEEVENTF_LEFTUP;
+                DWORD down_flag = MOUSEEVENTF_LEFTDOWN;
+                DWORD up_flag   = MOUSEEVENTF_LEFTUP;
+
+                if (g_state.button_mode == 1) {
+                    down_flag = MOUSEEVENTF_MIDDLEDOWN;
+                    up_flag   = MOUSEEVENTF_MIDDLEUP;
+                } else if (g_state.button_mode == 2) {
+                    down_flag = MOUSEEVENTF_RIGHTDOWN;
+                    up_flag   = MOUSEEVENTF_RIGHTUP;
+                }
 
                 inputs[0].type = INPUT_MOUSE;
                 inputs[0].mi.dwFlags = down_flag;
                 SendInput(1, &inputs[0], sizeof(INPUT));
 
-                Sleep(12);
+                double duty_ratio = (double)g_state.duty_cycle_pct / 100.0;
+                DWORD hold_ms = (DWORD)(total_delay_sec * 1000.0 * duty_ratio);
+                if (hold_ms < 6) hold_ms = 6;
+                if (hold_ms > 40) hold_ms = 40;
+                Sleep(hold_ms);
 
                 inputs[1].type = INPUT_MOUSE;
                 inputs[1].mi.dwFlags = up_flag;
@@ -196,7 +218,7 @@ static DWORD WINAPI clicker_worker_thread(LPVOID param) {
             }
         }
 
-        Sleep(2);
+        Sleep(1);
     }
 
     timeEndPeriod(1);
@@ -225,21 +247,6 @@ static void draw_rounded_card(Graphics* g, Brush* brush, Pen* pen, float x, floa
     if (pen) g->DrawPath(pen, &path);
 }
 
-static void draw_switch(Graphics* g, float x, float y, bool on) {
-    float w = 34.0f;
-    float h = 18.0f;
-    Color bgColor = on ? Color(255, 255, 255, 255) : Color(255, 39, 39, 44);
-    SolidBrush bg(bgColor);
-    fill_rounded_card(g, &bg, x, y, w, h, 9.0f);
-
-    float knobR = 6.5f;
-    float knobX = on ? (x + w - knobR - 2.5f) : (x + knobR + 2.5f);
-    float knobY = y + (h / 2.0f);
-    Color knobColor = on ? Color(255, 12, 12, 15) : Color(255, 161, 161, 170);
-    SolidBrush knobBrush(knobColor);
-    g->FillEllipse(&knobBrush, knobX - knobR, knobY - knobR, knobR * 2.0f, knobR * 2.0f);
-}
-
 static void on_paint(HWND hwnd) {
     PAINTSTRUCT ps;
     HDC hdcWindow = BeginPaint(hwnd, &ps);
@@ -260,41 +267,48 @@ static void on_paint(HWND hwnd) {
         g.SetInterpolationMode(InterpolationModeHighQualityBicubic);
         g.SetPixelOffsetMode(PixelOffsetModeHighQuality);
 
-        // 1. Deep Zinc Canvas #0c0c0f
-        SolidBrush winBg(Color(255, 12, 12, 15));
-        g.FillRectangle(&winBg, 0, 0, width, height);
+        int isDark = g_state.is_dark_mode;
 
-        // Window border: 1px subtle white/15
-        Pen winBorder(Color(38, 255, 255, 255), 1.0f);
-        g.DrawRectangle(&winBorder, 0, 0, width - 1, height - 1);
+        // STRICT PURE 000000 BLACK AND PURE FFFFFF WHITE COLOR SYSTEM
+        Color colorBg           = isDark ? Color(255, 0, 0, 0)          : Color(255, 255, 255, 255);
+        Color colorCardBg       = isDark ? Color(255, 14, 14, 14)      : Color(255, 246, 246, 248);
+        Color colorText         = isDark ? Color(255, 255, 255, 255)  : Color(255, 0, 0, 0);
+        Color colorTextSub      = isDark ? Color(255, 175, 175, 175)  : Color(255, 80, 80, 80);
+        Color colorBorder       = isDark ? Color(255, 255, 255, 255)  : Color(255, 0, 0, 0);
+        Color colorBorderSubtle = isDark ? Color(55, 255, 255, 255)   : Color(45, 0, 0, 0);
+        Color colorActivePill   = isDark ? Color(255, 255, 255, 255)  : Color(255, 0, 0, 0);
+        Color colorActiveText   = isDark ? Color(255, 0, 0, 0)          : Color(255, 255, 255, 255);
+        Color colorInactPill    = isDark ? Color(255, 28, 28, 28)      : Color(255, 228, 228, 232);
+        Color colorEmerald      = Color(255, 34, 197, 94);
 
-        // Typography (Segoe UI) - razor sharp with ClearTypeGridFit
+        SolidBrush brushBg(colorBg);
+        SolidBrush brushCardBg(colorCardBg);
+        SolidBrush brushText(colorText);
+        SolidBrush brushTextSub(colorTextSub);
+        SolidBrush brushActivePill(colorActivePill);
+        SolidBrush brushActiveText(colorActiveText);
+        SolidBrush brushInactPill(colorInactPill);
+        SolidBrush brushEmerald(colorEmerald);
+
+        Pen penBorder(colorBorder, 1.2f);
+        Pen penBorderSubtle(colorBorderSubtle, 1.0f);
+        Pen penAccent(colorEmerald, 2.0f);
+        Pen penCtrl(colorText, 1.5f);
+
+        // Fill window canvas with rounded corners
+        g.FillRectangle(&brushBg, 0, 0, width, height);
+
+        // Typography (Segoe UI) - ClearType GridFit ensures 100% crispness
         FontFamily ffSegoe(L"Segoe UI");
-        FontFamily ffConsolas(L"Consolas");
-        Gdiplus::Font fontLogo(&ffSegoe, 11.5f, FontStyleBold, UnitPoint);
-        Gdiplus::Font fontLogoSub(&ffSegoe, 8.5f, FontStyleBold, UnitPoint);
-        Gdiplus::Font fontHeroNum(&ffSegoe, 32.0f, FontStyleBold, UnitPoint);
-        Gdiplus::Font fontHeroBadge(&ffSegoe, 9.5f, FontStyleBold, UnitPoint);
-        Gdiplus::Font fontCardTitle(&ffSegoe, 9.5f, FontStyleBold, UnitPoint);
-        Gdiplus::Font fontSub(&ffSegoe, 8.0f, FontStyleRegular, UnitPoint);
-        Gdiplus::Font fontMicro(&ffSegoe, 7.5f, FontStyleBold, UnitPoint);
-        Gdiplus::Font fontBtn(&ffSegoe, 10.5f, FontStyleBold, UnitPoint);
-        Gdiplus::Font fontMono(&ffConsolas, 8.5f, FontStyleBold, UnitPoint);
+        FontFamily ffSymbol(L"Segoe UI Symbol");
 
-        // Palette
-        SolidBrush whiteBrush(Color(255, 255, 255, 255));
-        SolidBrush darkBrush(Color(255, 12, 12, 15));
-        SolidBrush zinc100(Color(255, 244, 244, 245));
-        SolidBrush zinc200(Color(255, 228, 228, 231));
-        SolidBrush zinc300(Color(255, 212, 212, 216));
-        SolidBrush zinc400(Color(255, 161, 161, 170));
-        SolidBrush zinc500(Color(255, 113, 113, 122));
-        SolidBrush emeraldBrush(Color(255, 16, 185, 129));
-        SolidBrush taupeBrush(Color(255, 89, 75, 69));
-
-        // Translucent card backgrounds
-        SolidBrush cardBg(Color(255, 18, 18, 22));
-        Pen cardBorder(Color(28, 255, 255, 255), 1.0f);
+        Gdiplus::Font fontTitle(&ffSegoe, 12.0f, FontStyleBold, UnitPoint);
+        Gdiplus::Font fontHero(&ffSegoe, 12.0f, FontStyleBold, UnitPoint);
+        Gdiplus::Font fontBody(&ffSegoe, 10.0f, FontStyleBold, UnitPoint);
+        Gdiplus::Font fontSub(&ffSegoe, 9.0f, FontStyleRegular, UnitPoint);
+        Gdiplus::Font fontSmall(&ffSegoe, 8.5f, FontStyleRegular, UnitPoint);
+        Gdiplus::Font fontMicro(&ffSegoe, 7.8f, FontStyleBold, UnitPoint);
+        Gdiplus::Font fontSymbol(&ffSymbol, 10.0f, FontStyleRegular, UnitPoint);
 
         StringFormat sfC;
         sfC.SetAlignment(StringAlignmentCenter);
@@ -308,344 +322,250 @@ static void on_paint(HWND hwnd) {
         sfR.SetAlignment(StringAlignmentFar);
         sfR.SetLineAlignment(StringAlignmentCenter);
 
-        // --- 1. TOP HEADER ZONE ---
-        // Top Left: promotezz logo + FREE badge
-        float logoX = 20.0f;
-        float logoY = 14.0f;
-        g.DrawString(L"promotezz", -1, &fontLogo, RectF(logoX, logoY, 90.0f, 24.0f), &sfL, &whiteBrush);
+        // --- 1. TITLE BAR ---
+        float titleH = 38.0f;
 
-        float badgeX = logoX + 92.0f;
-        float badgeY = logoY + 3.0f;
-        float badgeW = 44.0f;
-        float badgeH = 18.0f;
-        SolidBrush badgeBg(Color(25, 255, 255, 255));
-        Pen badgePen(Color(40, 255, 255, 255), 1.0f);
-        draw_rounded_card(&g, &badgeBg, &badgePen, badgeX, badgeY, badgeW, badgeH, 9.0f);
-        g.DrawString(L"FREE", -1, &fontLogoSub, RectF(badgeX, badgeY, badgeW, badgeH), &sfC, &zinc200);
+        // Gear icon (Settings / Theme switch)
+        g.DrawString(L"\u2699", -1, &fontSymbol, RectF((float)g_rect_gear.left, (float)g_rect_gear.top, 24.0f, 24.0f), &sfC, &brushText);
 
-        // Top Center: FLOATING DYNAMIC ISLAND CAPSULE (Matching promotezz.app)
-        float islandW = 160.0f;
-        float islandH = 32.0f;
-        float islandX = ((float)width - islandW) / 2.0f;
-        float islandY = 12.0f;
-
-        g_island_rect.left = (LONG)islandX;
-        g_island_rect.top = (LONG)islandY;
-        g_island_rect.right = (LONG)(islandX + islandW);
-        g_island_rect.bottom = (LONG)(islandY + islandH);
-
-        // Subtle island drop shadow
-        SolidBrush islandShadow(Color(50, 0, 0, 0));
-        fill_rounded_card(&g, &islandShadow, islandX, islandY + 2.0f, islandW, islandH, 16.0f);
-
-        SolidBrush islandBg(Color(255, 0, 0, 0));
-        Pen islandPen(Color(35, 255, 255, 255), 1.0f);
-        draw_rounded_card(&g, &islandBg, &islandPen, islandX, islandY, islandW, islandH, 16.0f);
+        // Mouse indicator button (turns glowing emerald green when active!)
+        float mouseX = (float)g_rect_mouse_btn.left;
+        float mouseY = (float)g_rect_mouse_btn.top;
+        float mouseW = 28.0f;
+        float mouseH = 24.0f;
 
         if (g_state.is_active) {
-            // Expanded Dynamic Island active state
-            g.FillEllipse(&emeraldBrush, islandX + 14.0f, islandY + 12.0f, 8.0f, 8.0f);
-            wchar_t actIslandBuf[64];
-            swprintf_s(actIslandBuf, 64, L"ACTIVE · %.1f CPS (F6)", g_state.target_cps);
-            g.DrawString(actIslandBuf, -1, &fontSub, RectF(islandX + 28.0f, islandY, islandW - 32.0f, islandH), &sfL, &whiteBrush);
+            // Glowing Active Emerald State
+            SolidBrush mActiveBg(Color(255, 34, 197, 94));
+            fill_rounded_card(&g, &mActiveBg, mouseX, mouseY, mouseW, mouseH, 6.0f);
+            Pen mActivePen(Color(255, 255, 255, 255), 1.5f);
+            g.DrawArc(&mActivePen, mouseX + 8.0f, mouseY + 4.0f, 12.0f, 16.0f, 0.0f, 360.0f);
+            g.DrawLine(&mActivePen, mouseX + 14.0f, mouseY + 4.0f, mouseX + 14.0f, mouseY + 10.0f);
         } else {
-            // Dynamic Island Inner Tabs: [Clicker | Tweaks]
-            float tabW = (islandW / 2.0f) - 4.0f;
-            float tabH = islandH - 6.0f;
-            float tabY = islandY + 3.0f;
-            float tabActiveX = islandX + 3.0f;
-
-            SolidBrush tabActiveBg(Color(255, 39, 39, 42));
-            fill_rounded_card(&g, &tabActiveBg, tabActiveX, tabY, tabW, tabH, 13.0f);
-            g.DrawString(L"Clicker", -1, &fontSub, RectF(tabActiveX, tabY, tabW, tabH), &sfC, &whiteBrush);
-
-            float tabInactX = tabActiveX + tabW + 2.0f;
-            g.DrawString(L"Tweaks", -1, &fontSub, RectF(tabInactX, tabY, tabW, tabH), &sfC, &zinc400);
+            // Idle State with subtle emerald outline
+            SolidBrush mIdleBg(isDark ? Color(35, 34, 197, 94) : Color(20, 34, 197, 94));
+            Pen mIdlePen(colorEmerald, 1.5f);
+            draw_rounded_card(&g, &mIdleBg, &mIdlePen, mouseX, mouseY, mouseW, mouseH, 6.0f);
+            g.DrawArc(&mIdlePen, mouseX + 8.0f, mouseY + 4.0f, 12.0f, 16.0f, 0.0f, 360.0f);
+            g.DrawLine(&mIdlePen, mouseX + 14.0f, mouseY + 4.0f, mouseX + 14.0f, mouseY + 10.0f);
         }
 
-        // Top Right: PROFILE PILL (Directly matching "(T) Dashboard •")
-        float pillW = 104.0f;
-        float pillH = 28.0f;
-        float pillX = (float)width - 68.0f - pillW;
-        float pillY = 14.0f;
+        // View Mode Icons (Layers, Grid, Target)
+        float iconX = mouseX + mouseW + 12.0f;
+        g.DrawString(L"\u25A4", -1, &fontSymbol, RectF(iconX, mouseY, 20.0f, 24.0f), &sfC, &brushTextSub);
+        iconX += 26.0f;
+        g.DrawString(L"\u229E", -1, &fontSymbol, RectF(iconX, mouseY, 20.0f, 24.0f), &sfC, &brushTextSub);
+        iconX += 26.0f;
+        g.DrawString(L"\u25CE", -1, &fontSymbol, RectF(iconX, mouseY, 20.0f, 24.0f), &sfC, &brushTextSub);
 
-        g_pill_dash_rect.left = (LONG)pillX;
-        g_pill_dash_rect.top = (LONG)pillY;
-        g_pill_dash_rect.right = (LONG)(pillX + pillW);
-        g_pill_dash_rect.bottom = (LONG)(pillY + pillH);
+        // Center Title: promotezz AutoClicker
+        g.DrawString(L"promotezz AutoClicker", -1, &fontTitle, RectF(0.0f, 0.0f, (float)width, titleH), &sfC, &brushText);
 
-        SolidBrush pillBg(Color(255, 24, 24, 27));
-        Pen pillPen(Color(35, 255, 255, 255), 1.0f);
-        draw_rounded_card(&g, &pillBg, &pillPen, pillX, pillY, pillW, pillH, 14.0f);
+        // Right Window Controls: Pin, Minimize, Close (Vector drawn - Zero Mojibake!)
+        float pinX = (float)g_rect_pin.left;
+        g.DrawString(L"\u2360", -1, &fontSymbol, RectF(pinX, mouseY, 20.0f, 24.0f), &sfC, &brushTextSub);
 
-        // Avatar Circle (T)
-        float avaD = 20.0f;
-        float avaX = pillX + 4.0f;
-        float avaY = pillY + 4.0f;
-        g.FillEllipse(&taupeBrush, avaX, avaY, avaD, avaD);
-        g.DrawString(L"T", -1, &fontMicro, RectF(avaX, avaY, avaD, avaD), &sfC, &whiteBrush);
+        float minX = (float)g_rect_min.left;
+        g.DrawLine(&penCtrl, minX + 4.0f, mouseY + 12.0f, minX + 16.0f, mouseY + 12.0f);
 
-        // Dashboard Text
-        g.DrawString(L"Dashboard", -1, &fontSub, RectF(avaX + avaD + 4.0f, pillY, 58.0f, pillH), &sfL, &zinc200);
+        float clsX = (float)g_rect_close.left;
+        g.DrawLine(&penCtrl, clsX + 4.0f, mouseY + 6.0f, clsX + 16.0f, mouseY + 18.0f);
+        g.DrawLine(&penCtrl, clsX + 16.0f, mouseY + 6.0f, clsX + 4.0f, mouseY + 18.0f);
 
-        // Emerald status dot
-        float dotD = 5.0f;
-        float dotX = pillX + pillW - 12.0f;
-        float dotY = pillY + ((pillH - dotD) / 2.0f);
-        g.FillEllipse(&emeraldBrush, dotX, dotY, dotD, dotD);
+        // Vibrant Emerald Accent Line (Signature BlurAutoClicker rule)
+        g.DrawLine(&penAccent, 0.0f, titleH, (float)width, titleH);
 
-        // Vector Window Controls (No text mojibake)
-        float minX = (float)width - 54.0f;
-        float minY = 16.0f;
-        Pen ctrlPen(Color(255, 161, 161, 170), 1.5f);
-        g.DrawLine(&ctrlPen, minX + 5.0f, minY + 11.0f, minX + 17.0f, minY + 11.0f);
+        // --- 2. ROW 1 (TOP CARD ROW) ---
+        float row1Y = titleH + 16.0f;
+        float cardH = 46.0f;
 
-        g_btn_min_rect.left = (LONG)minX;
-        g_btn_min_rect.top = (LONG)minY;
-        g_btn_min_rect.right = (LONG)(minX + 22.0f);
-        g_btn_min_rect.bottom = (LONG)(minY + 22.0f);
+        // Card 1: Click Speed Group [ 25 | Clicks Per | Second ▾ | Rate ▾ ]
+        float c1X = 14.0f;
+        float c1W = 390.0f;
+        draw_rounded_card(&g, &brushCardBg, &penBorderSubtle, c1X, row1Y, c1W, cardH, 8.0f);
 
-        float clsX = (float)width - 28.0f;
-        float clsY = 16.0f;
-        g.DrawLine(&ctrlPen, clsX + 5.0f, clsY + 5.0f, clsX + 17.0f, clsY + 17.0f);
-        g.DrawLine(&ctrlPen, clsX + 17.0f, clsY + 5.0f, clsX + 5.0f, clsY + 17.0f);
+        // CPS Number Box
+        float cpsBoxW = 60.0f;
+        wchar_t cpsStr[16];
+        swprintf_s(cpsStr, 16, L"%.0f", g_state.target_cps);
+        g.DrawString(cpsStr, -1, &fontHero, RectF(c1X, row1Y, cpsBoxW, cardH), &sfC, &brushText);
 
-        g_btn_close_rect.left = (LONG)clsX;
-        g_btn_close_rect.top = (LONG)clsY;
-        g_btn_close_rect.right = (LONG)(clsX + 22.0f);
-        g_btn_close_rect.bottom = (LONG)(clsY + 22.0f);
+        // Divider
+        float divX = c1X + cpsBoxW;
+        g.DrawLine(&penBorderSubtle, divX, row1Y + 8.0f, divX, row1Y + cardH - 8.0f);
 
-        // --- 2. HERO SPEED CARD ---
-        float card1X = 18.0f;
-        float card1Y = 58.0f;
-        float card1W = (float)width - 36.0f;
-        float card1H = 138.0f;
+        // "Clicks Per"
+        float cpW = 95.0f;
+        g.DrawString(L"Clicks Per", -1, &fontBody, RectF(divX, row1Y, cpW, cardH), &sfC, &brushText);
 
-        draw_rounded_card(&g, &cardBg, &cardBorder, card1X, card1Y, card1W, card1H, 14.0f);
+        divX += cpW;
+        g.DrawLine(&penBorderSubtle, divX, row1Y + 8.0f, divX, row1Y + cardH - 8.0f);
 
-        // Header: Label + Preset Pills
-        g.DrawString(L"TARGET CLICK SPEED", -1, &fontMicro, RectF(card1X + 16.0f, card1Y + 12.0f, 200.0f, 18.0f), &sfL, &zinc400);
+        // "Second ▾"
+        float secW = 115.0f;
+        g.DrawString(L"Second \u25BE", -1, &fontBody, RectF(divX, row1Y, secW, cardH), &sfC, &brushText);
 
-        // Preset Pills: [10] [12] [14] [18] [22]
-        float preX = card1X + card1W - 16.0f - (5.0f * 34.0f);
-        for (int i = 0; i < 5; i++) {
-            float pW = 30.0f;
-            float pH = 20.0f;
-            float pY = card1Y + 10.0f;
+        divX += secW;
+        g.DrawLine(&penBorderSubtle, divX, row1Y + 8.0f, divX, row1Y + cardH - 8.0f);
 
-            g_preset_rects[i].left = (LONG)preX;
-            g_preset_rects[i].top = (LONG)pY;
-            g_preset_rects[i].right = (LONG)(preX + pW);
-            g_preset_rects[i].bottom = (LONG)(pY + pH);
+        // "Rate ▾"
+        float rateW = c1W - (divX - c1X);
+        g.DrawString(L"Rate \u25BE", -1, &fontBody, RectF(divX, row1Y, rateW, cardH), &sfC, &brushText);
 
-            wchar_t pValStr[8];
-            swprintf_s(pValStr, 8, L"%.0f", PRESET_VALUES[i]);
+        // Card 2: Hotkey & Trigger Group [ F6  ⌨ | Toggle ▾ ]
+        float c2X = c1X + c1W + 12.0f;
+        float c2W = (float)width - c2X - 14.0f;
+        draw_rounded_card(&g, &brushCardBg, &penBorderSubtle, c2X, row1Y, c2W, cardH, 8.0f);
 
-            if (fabs(g_state.target_cps - PRESET_VALUES[i]) < 0.1) {
-                fill_rounded_card(&g, &whiteBrush, preX, pY, pW, pH, 10.0f);
-                g.DrawString(pValStr, -1, &fontMicro, RectF(preX, pY, pW, pH), &sfC, &darkBrush);
-            } else {
-                SolidBrush pBg(Color(255, 28, 28, 33));
-                Pen pPen(Color(25, 255, 255, 255), 1.0f);
-                draw_rounded_card(&g, &pBg, &pPen, preX, pY, pW, pH, 10.0f);
-                g.DrawString(pValStr, -1, &fontMicro, RectF(preX, pY, pW, pH), &sfC, &zinc400);
-            }
-            preX += 34.0f;
-        }
-
-        // Hero Speed Readout
-        float heroNumY = card1Y + 36.0f;
-        wchar_t cpsStr[32];
-        swprintf_s(cpsStr, 32, L"%.1f", g_state.target_cps);
-        g.DrawString(cpsStr, -1, &fontHeroNum, RectF(card1X + 14.0f, heroNumY, 110.0f, 46.0f), &sfL, &whiteBrush);
-
-        float cpsBadgeX = card1X + 126.0f;
-        float cpsBadgeY = heroNumY + 12.0f;
-        float cpsBadgeW = 46.0f;
-        float cpsBadgeH = 22.0f;
-        SolidBrush cpsBadgeBg(Color(255, 39, 39, 44));
-        fill_rounded_card(&g, &cpsBadgeBg, cpsBadgeX, cpsBadgeY, cpsBadgeW, cpsBadgeH, 11.0f);
-        g.DrawString(L"CPS", -1, &fontHeroBadge, RectF(cpsBadgeX, cpsBadgeY, cpsBadgeW, cpsBadgeH), &sfC, &zinc100);
-
-        g.DrawString(L"Sub-millisecond hardware mouse dispatch", -1, &fontSub, RectF(cpsBadgeX + cpsBadgeW + 12.0f, cpsBadgeY, 260.0f, cpsBadgeH), &sfL, &zinc500);
-
-        // Slider Track
-        float trackX = card1X + 16.0f;
-        float trackY = card1Y + 98.0f;
-        float trackW = card1W - 32.0f;
-        float trackH = 6.0f;
-
-        g_slider_rect.left = (LONG)trackX;
-        g_slider_rect.right = (LONG)(trackX + trackW);
-        g_slider_rect.top = (LONG)(trackY - 8.0f);
-        g_slider_rect.bottom = (LONG)(trackY + trackH + 8.0f);
-
-        SolidBrush trackBg(Color(255, 39, 39, 44));
-        fill_rounded_card(&g, &trackBg, trackX, trackY, trackW, trackH, 3.0f);
-
-        double pct = (g_state.target_cps - 6.0) / (24.0 - 6.0);
-        if (pct < 0.0) pct = 0.0;
-        if (pct > 1.0) pct = 1.0;
-        float fillW = (float)(trackW * pct);
-        if (fillW > 4.0f) {
-            fill_rounded_card(&g, &whiteBrush, trackX, trackY, fillW, trackH, 3.0f);
-        }
-
-        // Slider Knob
-        float knobR = 9.0f;
-        float knobX = trackX + fillW;
-        float knobY = trackY + (trackH / 2.0f);
-        SolidBrush knobShadow(Color(80, 0, 0, 0));
-        g.FillEllipse(&knobShadow, knobX - knobR - 1.0f, knobY - knobR + 2.0f, (knobR * 2.0f) + 2.0f, (knobR * 2.0f) + 2.0f);
-        g.FillEllipse(&whiteBrush, knobX - knobR, knobY - knobR, knobR * 2.0f, knobR * 2.0f);
-
-        g.DrawString(L"6.0 CPS (Standard)", -1, &fontSub, RectF(trackX, trackY + 12.0f, 150.0f, 18.0f), &sfL, &zinc500);
-        g.DrawString(L"24.0 CPS (Fast)", -1, &fontSub, RectF(trackX + trackW - 150.0f, trackY + 12.0f, 150.0f, 18.0f), &sfR, &zinc500);
-
-        // --- 3. DUAL CONFIGURATION CARDS ---
-        float cardGap = 12.0f;
-        float card2W = (card1W - cardGap) / 2.0f;
-        float card2H = 126.0f;
-        float card2Y = card1Y + card1H + 12.0f;
-
-        // LEFT CARD: INPUT TARGETING
-        float cardLeftX = card1X;
-        draw_rounded_card(&g, &cardBg, &cardBorder, cardLeftX, card2Y, card2W, card2H, 14.0f);
-
-        // Row 1: Click Button
-        float r1Y = card2Y + 12.0f;
-        g.DrawString(L"Click Button", -1, &fontCardTitle, RectF(cardLeftX + 14.0f, r1Y, 120.0f, 18.0f), &sfL, &whiteBrush);
-        g.DrawString(L"Target mouse key", -1, &fontSub, RectF(cardLeftX + 14.0f, r1Y + 18.0f, 120.0f, 16.0f), &sfL, &zinc500);
-
-        float segW = 46.0f;
-        float segH = 24.0f;
-        float segY = r1Y + 6.0f;
-        float segX = cardLeftX + card2W - 14.0f - (segW * 2.0f);
-
-        g_btn_seg_btn_rect.left = (LONG)segX;
-        g_btn_seg_btn_rect.top = (LONG)segY;
-        g_btn_seg_btn_rect.right = (LONG)(segX + (segW * 2.0f));
-        g_btn_seg_btn_rect.bottom = (LONG)(segY + segH);
-
-        SolidBrush segBg(Color(255, 28, 28, 33));
-        fill_rounded_card(&g, &segBg, segX, segY, segW * 2.0f, segH, 12.0f);
-
-        if (!g_state.right_click_mode) {
-            fill_rounded_card(&g, &whiteBrush, segX + 1.0f, segY + 1.0f, segW - 2.0f, segH - 2.0f, 11.0f);
-            g.DrawString(L"Left", -1, &fontSub, RectF(segX, segY, segW, segH), &sfC, &darkBrush);
-            g.DrawString(L"Right", -1, &fontSub, RectF(segX + segW, segY, segW, segH), &sfC, &zinc400);
-        } else {
-            fill_rounded_card(&g, &whiteBrush, segX + segW + 1.0f, segY + 1.0f, segW - 2.0f, segH - 2.0f, 11.0f);
-            g.DrawString(L"Left", -1, &fontSub, RectF(segX, segY, segW, segH), &sfC, &zinc400);
-            g.DrawString(L"Right", -1, &fontSub, RectF(segX + segW, segY, segW, segH), &sfC, &darkBrush);
-        }
-
-        Pen divPen(Color(20, 255, 255, 255), 1.0f);
-        g.DrawLine(&divPen, cardLeftX + 14.0f, card2Y + 62.0f, cardLeftX + card2W - 14.0f, card2Y + 62.0f);
-
-        // Row 2: Trigger Mode
-        float r2Y = card2Y + 72.0f;
-        g.DrawString(L"Trigger Mode", -1, &fontCardTitle, RectF(cardLeftX + 14.0f, r2Y, 120.0f, 18.0f), &sfL, &whiteBrush);
-        g.DrawString(L"Activation type", -1, &fontSub, RectF(cardLeftX + 14.0f, r2Y + 18.0f, 120.0f, 16.0f), &sfL, &zinc500);
-
-        float seg2Y = r2Y + 6.0f;
-        g_btn_seg_trig_rect.left = (LONG)segX;
-        g_btn_seg_trig_rect.top = (LONG)seg2Y;
-        g_btn_seg_trig_rect.right = (LONG)(segX + (segW * 2.0f));
-        g_btn_seg_trig_rect.bottom = (LONG)(seg2Y + segH);
-
-        fill_rounded_card(&g, &segBg, segX, seg2Y, segW * 2.0f, segH, 12.0f);
-
-        if (!g_state.hold_mode) {
-            fill_rounded_card(&g, &whiteBrush, segX + 1.0f, seg2Y + 1.0f, segW - 2.0f, segH - 2.0f, 11.0f);
-            g.DrawString(L"Toggle", -1, &fontSub, RectF(segX, seg2Y, segW, segH), &sfC, &darkBrush);
-            g.DrawString(L"Hold", -1, &fontSub, RectF(segX + segW, seg2Y, segW, segH), &sfC, &zinc400);
-        } else {
-            fill_rounded_card(&g, &whiteBrush, segX + segW + 1.0f, seg2Y + 1.0f, segW - 2.0f, segH - 2.0f, 11.0f);
-            g.DrawString(L"Toggle", -1, &fontSub, RectF(segX, seg2Y, segW, segH), &sfC, &zinc400);
-            g.DrawString(L"Hold", -1, &fontSub, RectF(segX + segW, seg2Y, segW, segH), &sfC, &darkBrush);
-        }
-
-        // RIGHT CARD: ENGINE CONFIGURATION
-        float cardRightX = cardLeftX + card2W + cardGap;
-        draw_rounded_card(&g, &cardBg, &cardBorder, cardRightX, card2Y, card2W, card2H, 14.0f);
-
-        // Row 1: Gaussian Jitter
-        float rj1Y = card2Y + 10.0f;
-        g.DrawString(L"Gaussian Jitter", -1, &fontCardTitle, RectF(cardRightX + 14.0f, rj1Y, 140.0f, 18.0f), &sfL, &whiteBrush);
-        g.DrawString(L"Humanize intervals", -1, &fontSub, RectF(cardRightX + 14.0f, rj1Y + 16.0f, 140.0f, 16.0f), &sfL, &zinc500);
-
-        float swX = cardRightX + card2W - 14.0f - 34.0f;
-        draw_switch(&g, swX, rj1Y + 6.0f, g_state.jitter_enabled);
-        g_sw_jitter_rect.left = (LONG)swX;
-        g_sw_jitter_rect.top = (LONG)(rj1Y + 4.0f);
-        g_sw_jitter_rect.right = (LONG)(swX + 34.0f);
-        g_sw_jitter_rect.bottom = (LONG)(rj1Y + 26.0f);
-
-        g.DrawLine(&divPen, cardRightX + 14.0f, card2Y + 46.0f, cardRightX + card2W - 14.0f, card2Y + 46.0f);
-
-        // Row 2: Click Audio
-        float rj2Y = card2Y + 50.0f;
-        g.DrawString(L"Click Audio", -1, &fontCardTitle, RectF(cardRightX + 14.0f, rj2Y, 140.0f, 18.0f), &sfL, &whiteBrush);
-        g.DrawString(L"Mechanical toggle cue", -1, &fontSub, RectF(cardRightX + 14.0f, rj2Y + 16.0f, 140.0f, 16.0f), &sfL, &zinc500);
-
-        draw_switch(&g, swX, rj2Y + 6.0f, g_state.sound_enabled);
-        g_sw_audio_rect.left = (LONG)swX;
-        g_sw_audio_rect.top = (LONG)(rj2Y + 4.0f);
-        g_sw_audio_rect.right = (LONG)(swX + 34.0f);
-        g_sw_audio_rect.bottom = (LONG)(rj2Y + 26.0f);
-
-        g.DrawLine(&divPen, cardRightX + 14.0f, card2Y + 86.0f, cardRightX + card2W - 14.0f, card2Y + 86.0f);
-
-        // Row 3: Hotkey Bind
-        float rj3Y = card2Y + 90.0f;
-        g.DrawString(L"Hotkey Bind", -1, &fontCardTitle, RectF(cardRightX + 14.0f, rj3Y, 140.0f, 18.0f), &sfL, &whiteBrush);
-        g.DrawString(L"Global activation key", -1, &fontSub, RectF(cardRightX + 14.0f, rj3Y + 16.0f, 140.0f, 16.0f), &sfL, &zinc500);
-
-        float hkW = 46.0f;
-        float hkH = 22.0f;
-        float hkX = cardRightX + card2W - 14.0f - hkW;
-        float hkY = rj3Y + 4.0f;
-
-        g_btn_bind_rect.left = (LONG)hkX;
-        g_btn_bind_rect.top = (LONG)hkY;
-        g_btn_bind_rect.right = (LONG)(hkX + hkW);
-        g_btn_bind_rect.bottom = (LONG)(hkY + hkH);
-
-        SolidBrush hkBg(Color(255, 39, 39, 44));
-        fill_rounded_card(&g, &hkBg, hkX, hkY, hkW, hkH, 11.0f);
+        // Hotkey Box: [ F6 ]
+        float hkW = 145.0f;
         wchar_t hkStr[16];
         swprintf_s(hkStr, 16, L"%S", HOTKEY_NAMES[g_hotkey_idx]);
-        g.DrawString(hkStr, -1, &fontMono, RectF(hkX, hkY, hkW, hkH), &sfC, &whiteBrush);
+        g.DrawString(hkStr, -1, &fontHero, RectF(c2X + 16.0f, row1Y, 60.0f, cardH), &sfL, &brushText);
+        g.DrawString(L"\u2328", -1, &fontSymbol, RectF(c2X + hkW - 34.0f, row1Y, 24.0f, cardH), &sfC, &brushTextSub);
 
-        // --- 4. BOTTOM MASTER ACTION & TELEMETRY ---
-        float btnW = card1W;
-        float btnH = 42.0f;
-        float btnX = card1X;
-        float btnY = (float)height - 62.0f;
+        float div2X = c2X + hkW;
+        g.DrawLine(&penBorderSubtle, div2X, row1Y + 8.0f, div2X, row1Y + cardH - 8.0f);
 
-        g_btn_toggle_rect.left = (LONG)btnX;
-        g_btn_toggle_rect.top = (LONG)btnY;
-        g_btn_toggle_rect.right = (LONG)(btnX + btnW);
-        g_btn_toggle_rect.bottom = (LONG)(btnY + btnH);
+        // Trigger Dropdown: [ Toggle ▾ / Hold ▾ ]
+        float trigW = c2W - hkW;
+        const wchar_t* trigStr = g_state.hold_mode ? L"Hold \u25BE" : L"Toggle \u25BE";
+        g.DrawString(trigStr, -1, &fontBody, RectF(div2X, row1Y, trigW, cardH), &sfC, &brushText);
 
-        if (g_state.is_active) {
-            SolidBrush activeBtn(Color(255, 24, 24, 27));
-            Pen activeRing(Color(255, 255, 255, 255), 2.0f);
-            draw_rounded_card(&g, &activeBtn, &activeRing, btnX, btnY, btnW, btnH, 21.0f);
-            g.FillEllipse(&emeraldBrush, btnX + (btnW / 2.0f) - 95.0f, btnY + 17.0f, 8.0f, 8.0f);
-            g.DrawString(L"STOP CLICKER (F6)", -1, &fontBtn, RectF(btnX, btnY, btnW, btnH), &sfC, &whiteBrush);
+        // --- 3. ROW 2 (BOTTOM CARD ROW) ---
+        float row2Y = row1Y + cardH + 12.0f;
+
+        // Card 3: Button Selector [ 🖱 | ⌨ | LEFT | MIDDLE | RIGHT ]
+        float c3X = 14.0f;
+        float c3W = 270.0f;
+        draw_rounded_card(&g, &brushCardBg, &penBorderSubtle, c3X, row2Y, c3W, cardH, 8.0f);
+
+        // Mouse Mode Pill (Active)
+        float mPillX = c3X + 8.0f;
+        float mPillY = row2Y + 8.0f;
+        float mPillW = 32.0f;
+        float mPillH = cardH - 16.0f;
+        fill_rounded_card(&g, &brushInactPill, mPillX, mPillY, mPillW, mPillH, 6.0f);
+        // Small mouse icon
+        Pen mSmallPen(colorText, 1.2f);
+        g.DrawArc(&mSmallPen, mPillX + 10.0f, mPillY + 7.0f, 12.0f, 16.0f, 0.0f, 360.0f);
+        g.DrawLine(&mSmallPen, mPillX + 16.0f, mPillY + 7.0f, mPillX + 16.0f, mPillY + 12.0f);
+
+        // Keyboard Mode Pill
+        float kPillX = mPillX + mPillW + 4.0f;
+        g.DrawString(L"\u2328", -1, &fontSymbol, RectF(kPillX, mPillY, mPillW, mPillH), &sfC, &brushTextSub);
+
+        // Divider
+        float div3X = kPillX + mPillW + 6.0f;
+        g.DrawLine(&penBorderSubtle, div3X, row2Y + 8.0f, div3X, row2Y + cardH - 8.0f);
+
+        // Segmented Buttons: LEFT | MIDDLE | RIGHT
+        float segBtnW = 54.0f;
+        float btnLeftX = div3X + 8.0f;
+        float btnMidX  = btnLeftX + segBtnW + 2.0f;
+        float btnRightX = btnMidX + segBtnW + 2.0f;
+
+        if (g_state.button_mode == 0) {
+            fill_rounded_card(&g, &brushActivePill, btnLeftX, mPillY, segBtnW, mPillH, 6.0f);
+            g.DrawString(L"LEFT", -1, &fontMicro, RectF(btnLeftX, mPillY, segBtnW, mPillH), &sfC, &brushActiveText);
+            g.DrawString(L"MIDDLE", -1, &fontMicro, RectF(btnMidX, mPillY, segBtnW, mPillH), &sfC, &brushTextSub);
+            g.DrawString(L"RIGHT", -1, &fontMicro, RectF(btnRightX, mPillY, segBtnW, mPillH), &sfC, &brushTextSub);
+        } else if (g_state.button_mode == 1) {
+            fill_rounded_card(&g, &brushActivePill, btnMidX, mPillY, segBtnW, mPillH, 6.0f);
+            g.DrawString(L"LEFT", -1, &fontMicro, RectF(btnLeftX, mPillY, segBtnW, mPillH), &sfC, &brushTextSub);
+            g.DrawString(L"MIDDLE", -1, &fontMicro, RectF(btnMidX, mPillY, segBtnW, mPillH), &sfC, &brushActiveText);
+            g.DrawString(L"RIGHT", -1, &fontMicro, RectF(btnRightX, mPillY, segBtnW, mPillH), &sfC, &brushTextSub);
         } else {
-            fill_rounded_card(&g, &whiteBrush, btnX, btnY, btnW, btnH, 21.0f);
-            g.DrawString(L"START CLICKER (F6)", -1, &fontBtn, RectF(btnX, btnY, btnW, btnH), &sfC, &darkBrush);
+            fill_rounded_card(&g, &brushActivePill, btnRightX, mPillY, segBtnW, mPillH, 6.0f);
+            g.DrawString(L"LEFT", -1, &fontMicro, RectF(btnLeftX, mPillY, segBtnW, mPillH), &sfC, &brushTextSub);
+            g.DrawString(L"MIDDLE", -1, &fontMicro, RectF(btnMidX, mPillY, segBtnW, mPillH), &sfC, &brushTextSub);
+            g.DrawString(L"RIGHT", -1, &fontMicro, RectF(btnRightX, mPillY, segBtnW, mPillH), &sfC, &brushActiveText);
         }
 
-        // Micro Telemetry Row
-        float telY = (float)height - 18.0f;
-        wchar_t telBuf[128];
-        swprintf_s(telBuf, 128, L"%.1f MB RAM   ·   %lld CLICKS   ·   %.1f LIVE CPS   ·   PROMOTEZZ ENGINE",
-            g_state.ram_mb, g_state.total_clicks, g_state.current_live_cps);
-        g.DrawString(telBuf, -1, &fontMicro, RectF(0.0f, telY, (float)width, 14.0f), &sfC, &zinc500);
+        // Card 4: Duty Cycle [ Duty Cycle | 45 % ]
+        float c4X = c3X + c3W + 12.0f;
+        float c4W = 180.0f;
+        draw_rounded_card(&g, &brushCardBg, &penBorderSubtle, c4X, row2Y, c4W, cardH, 8.0f);
+
+        float dcLabelW = 105.0f;
+        g.DrawString(L"Duty Cycle", -1, &fontBody, RectF(c4X, row2Y, dcLabelW, cardH), &sfC, &brushText);
+
+        float div4X = c4X + dcLabelW;
+        g.DrawLine(&penBorderSubtle, div4X, row2Y + 8.0f, div4X, row2Y + cardH - 8.0f);
+
+        float dcValW = c4W - dcLabelW;
+        wchar_t dcBuf[16];
+        swprintf_s(dcBuf, 16, L"%d %%", g_state.duty_cycle_pct);
+        g.DrawString(dcBuf, -1, &fontHero, RectF(div4X, row2Y, dcValW, cardH), &sfC, &brushText);
+
+        // Card 5: Speed Randomization [ Speed Randomization | 35 % ]
+        float c5X = c4X + c4W + 12.0f;
+        float c5W = (float)width - c5X - 14.0f;
+        draw_rounded_card(&g, &brushCardBg, &penBorderSubtle, c5X, row2Y, c5W, cardH, 8.0f);
+
+        float randLabelW = 150.0f;
+        g.DrawString(L"Speed Randomization", -1, &fontBody, RectF(c5X, row2Y, randLabelW, cardH), &sfC, &brushText);
+
+        float div5X = c5X + randLabelW;
+        g.DrawLine(&penBorderSubtle, div5X, row2Y + 8.0f, div5X, row2Y + cardH - 8.0f);
+
+        float randValW = c5W - randLabelW;
+        wchar_t randBuf[16];
+        swprintf_s(randBuf, 16, L"%d %%", g_state.speed_rand_pct);
+        g.DrawString(randBuf, -1, &fontHero, RectF(div5X, row2Y, randValW, cardH), &sfC, &brushText);
+
+        // --- 4. FOOTER STATUS BAR ---
+        float footY = (float)height - 26.0f;
+        g.DrawLine(&penBorderSubtle, 0.0f, footY, (float)width, footY);
+
+        // Left Status & Audio (Vector Speaker)
+        float footTextX = 14.0f;
+        Point speakerPts[6] = {
+            Point((INT)footTextX, (INT)footY + 10),
+            Point((INT)footTextX + 4, (INT)footY + 10),
+            Point((INT)footTextX + 8, (INT)footY + 6),
+            Point((INT)footTextX + 8, (INT)footY + 18),
+            Point((INT)footTextX + 4, (INT)footY + 14),
+            Point((INT)footTextX, (INT)footY + 14)
+        };
+        g.FillPolygon(&brushEmerald, speakerPts, 6);
+        g.DrawArc(&penAccent, footTextX + 9.0f, footY + 7.0f, 6.0f, 10.0f, -60.0f, 120.0f);
+
+        wchar_t footBuf[128];
+        if (g_state.is_active) {
+            swprintf_s(footBuf, 128, L"ACTIVE · %lld clicks · %.1f Live CPS (prmtz engine < 3.2 MB)",
+                g_state.total_clicks, g_state.current_live_cps);
+        } else {
+            swprintf_s(footBuf, 128, L"Audio: %s · prmtz engine (< 3.2 MB RAM) · Target: %.0f CPS",
+                g_state.sound_enabled ? L"ON" : L"MUTE", g_state.target_cps);
+        }
+        g.DrawString(footBuf, -1, &fontSmall, RectF(footTextX + 22.0f, footY, 380.0f, 24.0f), &sfL, &brushTextSub);
+
+        // Right Controls: THEME TOGGLE PILL [ ☀️ Light / 🌙 Dark ]
+        float themePillW = 80.0f;
+        float themePillH = 18.0f;
+        float themePillX = (float)width - 180.0f;
+        float themePillY = footY + 3.0f;
+
+        g_rect_theme_toggle.left   = (LONG)themePillX;
+        g_rect_theme_toggle.top    = (LONG)themePillY;
+        g_rect_theme_toggle.right  = (LONG)(themePillX + themePillW);
+        g_rect_theme_toggle.bottom = (LONG)(themePillY + themePillH);
+
+        fill_rounded_card(&g, &brushInactPill, themePillX, themePillY, themePillW, themePillH, 9.0f);
+        const wchar_t* themeStr = isDark ? L"\u2600 Light" : L"\u263D Dark";
+        g.DrawString(themeStr, -1, &fontMicro, RectF(themePillX, themePillY, themePillW, themePillH), &sfC, &brushText);
+
+        // Zoom scale
+        float zoomX = themePillX + themePillW + 12.0f;
+        g.DrawString(L"200%", -1, &fontSmall, RectF(zoomX, footY, 40.0f, 24.0f), &sfC, &brushTextSub);
+
+        // Version
+        float verX = (float)width - 45.0f;
+        g.DrawString(L"v1.0.0", -1, &fontSmall, RectF(verX, footY, 36.0f, 24.0f), &sfR, &brushTextSub);
+
+        // Window border (outer)
+        g.DrawRectangle(&penBorder, 0, 0, width - 1, height - 1);
     }
 
     BitBlt(hdcWindow, 0, 0, width, height, hdc, 0, 0, SRCCOPY);
@@ -654,16 +574,6 @@ static void on_paint(HWND hwnd) {
     DeleteObject(hbm);
     DeleteDC(hdc);
     EndPaint(hwnd, &ps);
-}
-
-static void update_slider_from_mouse(int mouse_x) {
-    int track_x = g_slider_rect.left;
-    int track_w = g_slider_rect.right - g_slider_rect.left;
-    double ratio = (double)(mouse_x - track_x) / (double)track_w;
-    if (ratio < 0.0) ratio = 0.0;
-    if (ratio > 1.0) ratio = 1.0;
-    double new_cps = 6.0 + ratio * (24.0 - 6.0);
-    g_state.target_cps = floor(new_cps * 10.0 + 0.5) / 10.0;
 }
 
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -680,81 +590,30 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         pt.x = LOWORD(lParam);
         pt.y = HIWORD(lParam);
 
-        // Window Controls
-        if (PtInRect(&g_btn_close_rect, pt)) {
+        // 1. Close Button
+        if (PtInRect(&g_rect_close, pt)) {
             g_state.should_exit = 1;
             PostQuitMessage(0);
             return 0;
         }
-        if (PtInRect(&g_btn_min_rect, pt)) {
+
+        // 2. Minimize Button
+        if (PtInRect(&g_rect_min, pt)) {
             ShowWindow(hwnd, SW_MINIMIZE);
             return 0;
         }
 
-        // Dashboard Pill click -> open website
-        if (PtInRect(&g_pill_dash_rect, pt)) {
-            ShellExecuteA(NULL, "open", "https://promotezz.cc/dashboard", NULL, NULL, SW_SHOWNORMAL);
-            return 0;
-        }
-
-        // Preset Pills
-        for (int i = 0; i < 5; i++) {
-            if (PtInRect(&g_preset_rects[i], pt)) {
-                g_state.target_cps = PRESET_VALUES[i];
-                InvalidateRect(hwnd, NULL, FALSE);
-                return 0;
-            }
-        }
-
-        // Slider Track
-        if (PtInRect(&g_slider_rect, pt)) {
-            g_is_dragging_slider = 1;
-            SetCapture(hwnd);
-            update_slider_from_mouse(pt.x);
+        // 3. Theme Toggle (Pill in footer or Gear in header)
+        if (PtInRect(&g_rect_theme_toggle, pt) || PtInRect(&g_rect_gear, pt)) {
+            g_state.is_dark_mode = !g_state.is_dark_mode;
+            BOOL use_dark = g_state.is_dark_mode ? TRUE : FALSE;
+            DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE_VAL, &use_dark, sizeof(use_dark));
             InvalidateRect(hwnd, NULL, FALSE);
             return 0;
         }
 
-        // Segmented Click Button: Left / Right
-        if (PtInRect(&g_btn_seg_btn_rect, pt)) {
-            int mid = (g_btn_seg_btn_rect.left + g_btn_seg_btn_rect.right) / 2;
-            g_state.right_click_mode = (pt.x >= mid) ? 1 : 0;
-            InvalidateRect(hwnd, NULL, FALSE);
-            return 0;
-        }
-
-        // Segmented Trigger Type: Toggle / Hold
-        if (PtInRect(&g_btn_seg_trig_rect, pt)) {
-            int mid = (g_btn_seg_trig_rect.left + g_btn_seg_trig_rect.right) / 2;
-            g_state.hold_mode = (pt.x >= mid) ? 1 : 0;
-            InvalidateRect(hwnd, NULL, FALSE);
-            return 0;
-        }
-
-        // Jitter Switch
-        if (PtInRect(&g_sw_jitter_rect, pt)) {
-            g_state.jitter_enabled = !g_state.jitter_enabled;
-            InvalidateRect(hwnd, NULL, FALSE);
-            return 0;
-        }
-
-        // Audio Switch
-        if (PtInRect(&g_sw_audio_rect, pt)) {
-            g_state.sound_enabled = !g_state.sound_enabled;
-            InvalidateRect(hwnd, NULL, FALSE);
-            return 0;
-        }
-
-        // Hotkey Bind Button
-        if (PtInRect(&g_btn_bind_rect, pt)) {
-            g_hotkey_idx = (g_hotkey_idx + 1) % HOTKEY_COUNT;
-            g_state.hotkey_vk = HOTKEY_VKS[g_hotkey_idx];
-            InvalidateRect(hwnd, NULL, FALSE);
-            return 0;
-        }
-
-        // Start / Stop Master Pill Button
-        if (PtInRect(&g_btn_toggle_rect, pt)) {
+        // 4. Mouse Status Button in Header -> Start / Stop clicker!
+        if (PtInRect(&g_rect_mouse_btn, pt)) {
             g_state.is_active = !g_state.is_active;
             if (g_state.sound_enabled) {
                 MessageBeep(g_state.is_active ? MB_OK : MB_ICONASTERISK);
@@ -763,8 +622,81 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             return 0;
         }
 
-        // Draggable Title / Header Area
-        if (pt.y < 56) {
+        // 5. CPS Number Box -> Left click increases (+1, or cycles presets 10, 15, 20, 25, 30, 40, 50)
+        if (PtInRect(&g_rect_cps_box, pt)) {
+            static const double PRESETS[] = { 10.0, 15.0, 20.0, 25.0, 30.0, 40.0, 50.0 };
+            static int p_idx = 3; // 25.0 default
+            p_idx = (p_idx + 1) % 7;
+            g_state.target_cps = PRESETS[p_idx];
+            InvalidateRect(hwnd, NULL, FALSE);
+            return 0;
+        }
+
+        // 6. Hotkey Box -> Click cycles hotkeys (F6, X, C, V, M4)
+        if (PtInRect(&g_rect_hotkey_box, pt)) {
+            g_hotkey_idx = (g_hotkey_idx + 1) % HOTKEY_COUNT;
+            g_state.hotkey_vk = HOTKEY_VKS[g_hotkey_idx];
+            InvalidateRect(hwnd, NULL, FALSE);
+            return 0;
+        }
+
+        // 7. Trigger Mode Box -> Toggle / Hold
+        if (PtInRect(&g_rect_trigger_box, pt)) {
+            g_state.hold_mode = !g_state.hold_mode;
+            InvalidateRect(hwnd, NULL, FALSE);
+            return 0;
+        }
+
+        // 8. Button Mode: LEFT
+        if (PtInRect(&g_rect_btn_left, pt)) {
+            g_state.button_mode = 0;
+            InvalidateRect(hwnd, NULL, FALSE);
+            return 0;
+        }
+
+        // 9. Button Mode: MIDDLE
+        if (PtInRect(&g_rect_btn_mid, pt)) {
+            g_state.button_mode = 1;
+            InvalidateRect(hwnd, NULL, FALSE);
+            return 0;
+        }
+
+        // 10. Button Mode: RIGHT
+        if (PtInRect(&g_rect_btn_right, pt)) {
+            g_state.button_mode = 2;
+            InvalidateRect(hwnd, NULL, FALSE);
+            return 0;
+        }
+
+        // 11. Duty Cycle Box -> Cycles 30%, 45%, 60%, 75%
+        if (PtInRect(&g_rect_duty_cycle, pt)) {
+            if (g_state.duty_cycle_pct == 30) g_state.duty_cycle_pct = 45;
+            else if (g_state.duty_cycle_pct == 45) g_state.duty_cycle_pct = 60;
+            else if (g_state.duty_cycle_pct == 60) g_state.duty_cycle_pct = 75;
+            else g_state.duty_cycle_pct = 30;
+            InvalidateRect(hwnd, NULL, FALSE);
+            return 0;
+        }
+
+        // 12. Speed Randomization Box -> Cycles 0%, 15%, 35%, 50%
+        if (PtInRect(&g_rect_speed_rand, pt)) {
+            if (g_state.speed_rand_pct == 0) g_state.speed_rand_pct = 15;
+            else if (g_state.speed_rand_pct == 15) g_state.speed_rand_pct = 35;
+            else if (g_state.speed_rand_pct == 35) g_state.speed_rand_pct = 50;
+            else g_state.speed_rand_pct = 0;
+            InvalidateRect(hwnd, NULL, FALSE);
+            return 0;
+        }
+
+        // 13. Audio status in Footer -> Toggle Audio ON/OFF
+        if (PtInRect(&g_rect_audio, pt)) {
+            g_state.sound_enabled = !g_state.sound_enabled;
+            InvalidateRect(hwnd, NULL, FALSE);
+            return 0;
+        }
+
+        // 14. Title bar dragging
+        if (pt.y < 38) {
             ReleaseCapture();
             SendMessage(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0);
             return 0;
@@ -773,22 +705,20 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         break;
     }
 
-    case WM_MOUSEMOVE:
-        if (g_is_dragging_slider) {
-            int x = LOWORD(lParam);
-            update_slider_from_mouse(x);
+    case WM_RBUTTONDOWN: {
+        POINT pt;
+        pt.x = LOWORD(lParam);
+        pt.y = HIWORD(lParam);
+
+        // Right click CPS Box decreases CPS (-5)
+        if (PtInRect(&g_rect_cps_box, pt)) {
+            g_state.target_cps -= 5.0;
+            if (g_state.target_cps < 5.0) g_state.target_cps = 50.0;
             InvalidateRect(hwnd, NULL, FALSE);
             return 0;
         }
         break;
-
-    case WM_LBUTTONUP:
-        if (g_is_dragging_slider) {
-            g_is_dragging_slider = 0;
-            ReleaseCapture();
-            return 0;
-        }
-        break;
+    }
 
     case WM_DESTROY:
         g_state.should_exit = 1;
@@ -802,7 +732,9 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
 extern "C" {
 
 void prmtz_gui_init(double initial_cps) {
-    g_state.target_cps = initial_cps;
+    if (initial_cps > 0.0) {
+        g_state.target_cps = initial_cps;
+    }
     HINSTANCE hInstance = GetModuleHandleA(NULL);
 
     GdiplusStartupInput gdiplusStartupInput;
@@ -840,7 +772,7 @@ void prmtz_gui_init(double initial_cps) {
     DWM_WINDOW_CORNER_PREFERENCE corner_pref = (DWM_WINDOW_CORNER_PREFERENCE)DWMWCP_ROUND_VAL;
     DwmSetWindowAttribute(hwnd, (DWORD)DWMWA_WINDOW_CORNER_PREFERENCE_VAL, &corner_pref, sizeof(corner_pref));
 
-    BOOL use_dark_mode = TRUE;
+    BOOL use_dark_mode = g_state.is_dark_mode ? TRUE : FALSE;
     DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE_VAL, &use_dark_mode, sizeof(use_dark_mode));
 
     MARGINS margins = { 1, 1, 1, 1 };
