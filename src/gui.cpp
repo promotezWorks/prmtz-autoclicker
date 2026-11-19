@@ -30,14 +30,26 @@ using namespace Gdiplus;
 #define DWMWA_WINDOW_CORNER_PREFERENCE_VAL 33
 #define DWMWCP_ROUND_VAL 2
 
+typedef enum {
+    TARGET_TYPE_MOUSE_LEFT = 0,
+    TARGET_TYPE_MOUSE_RIGHT = 1,
+    TARGET_TYPE_MOUSE_MIDDLE = 2,
+    TARGET_TYPE_MOUSE_X1 = 3,       /* M4 / Back */
+    TARGET_TYPE_MOUSE_X2 = 4,       /* M5 / Forward */
+    TARGET_TYPE_KEYBOARD = 5        /* Any keyboard virtual key */
+} ClickTargetType;
+
 typedef struct {
     double target_cps;
     int is_active;
     int hotkey_vk;
+    int is_binding_hotkey;
     int sound_enabled;
     int speed_rand_pct;     /* 0, 15, 35, 50 % */
     int duty_cycle_pct;     /* 30, 45, 60, 75 % */
-    int button_mode;        /* 0 = Left, 1 = Middle, 2 = Right */
+    int target_type;        /* ClickTargetType */
+    int target_vk;          /* VK_LBUTTON default, or 'E', VK_SPACE, etc. */
+    int is_binding_target;
     int hold_mode;          /* 0 = Toggle, 1 = Hold */
     int is_dark_mode;       /* 0 = Black-on-White (Light), 1 = White-on-000000-Black (Dark) */
     long long total_clicks;
@@ -49,29 +61,29 @@ typedef struct {
 } BlurClickerState;
 
 static BlurClickerState g_state = {
-    25.0,       /* target_cps (matching BlurAutoClicker default 25 CPS) */
-    0,          /* is_active */
-    VK_F6,      /* hotkey_vk */
-    1,          /* sound_enabled */
-    35,         /* speed_rand_pct (matching Blur 35%) */
-    45,         /* duty_cycle_pct (matching Blur 45%) */
-    0,          /* button_mode (0=Left, 1=Middle, 2=Right) */
-    0,          /* hold_mode (0=Toggle, 1=Hold) */
-    0,          /* is_dark_mode (0 = Black-on-White default, toggleable to 1 = White-on-Black) */
-    0,          /* total_clicks */
-    0.0,        /* current_live_cps */
-    0.2,        /* ram_mb */
+    25.0,                   /* target_cps (matching BlurAutoClicker default 25 CPS) */
+    0,                      /* is_active */
+    VK_F6,                  /* hotkey_vk */
+    0,                      /* is_binding_hotkey */
+    1,                      /* sound_enabled */
+    35,                     /* speed_rand_pct (matching Blur 35%) */
+    45,                     /* duty_cycle_pct (matching Blur 45%) */
+    TARGET_TYPE_MOUSE_LEFT, /* target_type */
+    VK_LBUTTON,             /* target_vk */
+    0,                      /* is_binding_target */
+    0,                      /* hold_mode (0 = Toggle, 1 = Hold) */
+    0,                      /* is_dark_mode (0 = Light, 1 = Dark) */
+    0,                      /* total_clicks */
+    0.0,                    /* current_live_cps */
+    0.2,                    /* ram_mb */
     NULL,
     NULL,
     0
 };
 
 static ULONG_PTR g_gdiplusToken = 0;
-
-static const int HOTKEY_VKS[] = { VK_F6, 'X', 'C', 'V', VK_XBUTTON1 };
-static const char* HOTKEY_NAMES[] = { "F6", "X", "C", "V", "M4" };
-static const int HOTKEY_COUNT = 5;
-static int g_hotkey_idx = 0;
+static int g_binding_wait_release = 0;
+static int g_binding_ignore_vk = 0;
 
 /* Window Metrics: 720 x 210 Landscape form factor identical to BlurAutoClicker */
 static const int WIN_WIDTH  = 720;
@@ -91,15 +103,74 @@ static RECT g_rect_hotkey_box   = { 416, 54, 561, 100 };
 static RECT g_rect_trigger_box  = { 561, 54, 706, 100 };
 
 /* Row 2 */
-static RECT g_rect_btn_left     = { 104, 122, 158, 152 };
-static RECT g_rect_btn_mid      = { 160, 122, 214, 152 };
-static RECT g_rect_btn_right    = { 216, 122, 270, 152 };
+static RECT g_rect_mode_icon    = { 14, 114, 54, 160 };
+static RECT g_rect_btn_left     = { 56, 118, 106, 154 };
+static RECT g_rect_btn_right    = { 110, 118, 160, 154 };
+static RECT g_rect_target_box   = { 164, 118, 280, 154 };
 static RECT g_rect_duty_cycle   = { 296, 114, 476, 160 };
 static RECT g_rect_speed_rand   = { 488, 114, 706, 160 };
 
 /* Footer */
 static RECT g_rect_audio        = { 14, 184, 250, 208 };
 static RECT g_rect_theme_toggle = { 545, 186, 625, 206 };
+
+/* Format any virtual key code or mouse button into a clean, friendly display name */
+static void get_vk_name(int vk, wchar_t* out, size_t max_chars) {
+    if (vk == VK_LBUTTON) { wcscpy_s(out, max_chars, L"LMB"); return; }
+    if (vk == VK_RBUTTON) { wcscpy_s(out, max_chars, L"RMB"); return; }
+    if (vk == VK_MBUTTON) { wcscpy_s(out, max_chars, L"MMB"); return; }
+    if (vk == VK_XBUTTON1) { wcscpy_s(out, max_chars, L"M4"); return; }
+    if (vk == VK_XBUTTON2) { wcscpy_s(out, max_chars, L"M5"); return; }
+    if (vk == VK_SPACE) { wcscpy_s(out, max_chars, L"SPACE"); return; }
+    if (vk == VK_SHIFT || vk == VK_LSHIFT || vk == VK_RSHIFT) { wcscpy_s(out, max_chars, L"SHIFT"); return; }
+    if (vk == VK_CONTROL || vk == VK_LCONTROL || vk == VK_RCONTROL) { wcscpy_s(out, max_chars, L"CTRL"); return; }
+    if (vk == VK_MENU || vk == VK_LMENU || vk == VK_RMENU) { wcscpy_s(out, max_chars, L"ALT"); return; }
+    if (vk == VK_CAPITAL) { wcscpy_s(out, max_chars, L"CAPS"); return; }
+    if (vk == VK_TAB) { wcscpy_s(out, max_chars, L"TAB"); return; }
+    if (vk == VK_RETURN) { wcscpy_s(out, max_chars, L"ENTER"); return; }
+    if (vk == VK_ESCAPE) { wcscpy_s(out, max_chars, L"ESC"); return; }
+    if (vk == VK_BACK) { wcscpy_s(out, max_chars, L"BKSP"); return; }
+    if (vk >= 'A' && vk <= 'Z') {
+        swprintf_s(out, max_chars, L"%c", (wchar_t)vk);
+        return;
+    }
+    if (vk >= '0' && vk <= '9') {
+        swprintf_s(out, max_chars, L"%c", (wchar_t)vk);
+        return;
+    }
+    if (vk >= VK_F1 && vk <= VK_F12) {
+        swprintf_s(out, max_chars, L"F%d", vk - VK_F1 + 1);
+        return;
+    }
+    if (vk >= VK_NUMPAD0 && vk <= VK_NUMPAD9) {
+        swprintf_s(out, max_chars, L"NUM%d", vk - VK_NUMPAD0);
+        return;
+    }
+    if (vk == VK_LEFT) { wcscpy_s(out, max_chars, L"LEFT"); return; }
+    if (vk == VK_UP) { wcscpy_s(out, max_chars, L"UP"); return; }
+    if (vk == VK_RIGHT) { wcscpy_s(out, max_chars, L"RIGHT"); return; }
+    if (vk == VK_DOWN) { wcscpy_s(out, max_chars, L"DOWN"); return; }
+    if (vk == VK_OEM_1) { wcscpy_s(out, max_chars, L";"); return; }
+    if (vk == VK_OEM_PLUS) { wcscpy_s(out, max_chars, L"+"); return; }
+    if (vk == VK_OEM_COMMA) { wcscpy_s(out, max_chars, L","); return; }
+    if (vk == VK_OEM_MINUS) { wcscpy_s(out, max_chars, L"-"); return; }
+    if (vk == VK_OEM_PERIOD) { wcscpy_s(out, max_chars, L"."); return; }
+    if (vk == VK_OEM_2) { wcscpy_s(out, max_chars, L"/"); return; }
+    if (vk == VK_OEM_3) { wcscpy_s(out, max_chars, L"`"); return; }
+    if (vk == VK_OEM_4) { wcscpy_s(out, max_chars, L"["); return; }
+    if (vk == VK_OEM_5) { wcscpy_s(out, max_chars, L"\\"); return; }
+    if (vk == VK_OEM_6) { wcscpy_s(out, max_chars, L"]"); return; }
+    if (vk == VK_OEM_7) { wcscpy_s(out, max_chars, L"'"); return; }
+
+    UINT sc = MapVirtualKeyW(vk, MAPVK_VK_TO_VSC);
+    wchar_t name[64] = {0};
+    if (sc != 0 && GetKeyNameTextW((LONG)(sc << 16), name, 64) > 0) {
+        _wcsupr_s(name, 64);
+        wcsncpy_s(out, max_chars, name, max_chars - 1);
+        return;
+    }
+    swprintf_s(out, max_chars, L"VK_%02X", vk);
+}
 
 /* Gaussian random generator (Box-Muller) */
 static double generate_gaussian_jitter(double std_dev) {
@@ -136,6 +207,80 @@ static DWORD WINAPI clicker_worker_thread(LPVOID param) {
     int hotkey_was_down = 0;
 
     while (!g_state.should_exit) {
+        // =========================================================
+        // 1. DYNAMIC BIND MODE (Choose ANY key or mouse button)
+        // =========================================================
+        if (g_state.is_binding_hotkey || g_state.is_binding_target) {
+            if (g_binding_wait_release) {
+                if ((GetAsyncKeyState(g_binding_ignore_vk) & 0x8000) == 0) {
+                    g_binding_wait_release = 0;
+                    g_binding_ignore_vk = 0;
+                }
+                Sleep(10);
+                continue;
+            }
+
+            int detected_vk = 0;
+
+            // Check mouse buttons
+            if ((GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0) detected_vk = VK_LBUTTON;
+            else if ((GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0) detected_vk = VK_RBUTTON;
+            else if ((GetAsyncKeyState(VK_MBUTTON) & 0x8000) != 0) detected_vk = VK_MBUTTON;
+            else if ((GetAsyncKeyState(VK_XBUTTON1) & 0x8000) != 0) detected_vk = VK_XBUTTON1;
+            else if ((GetAsyncKeyState(VK_XBUTTON2) & 0x8000) != 0) detected_vk = VK_XBUTTON2;
+            else {
+                // Check keyboard keys (from Backspace to OEM keys)
+                for (int k = 8; k <= 222; k++) {
+                    if ((GetAsyncKeyState(k) & 0x8000) != 0) {
+                        detected_vk = k;
+                        break;
+                    }
+                }
+            }
+
+            if (detected_vk != 0) {
+                if (detected_vk == VK_ESCAPE) {
+                    // ESC cancels bind mode
+                    g_state.is_binding_hotkey = 0;
+                    g_state.is_binding_target = 0;
+                } else if (g_state.is_binding_hotkey) {
+                    g_state.hotkey_vk = detected_vk;
+                    g_state.is_binding_hotkey = 0;
+                } else if (g_state.is_binding_target) {
+                    if (detected_vk == VK_LBUTTON) {
+                        g_state.target_type = TARGET_TYPE_MOUSE_LEFT;
+                        g_state.target_vk = VK_LBUTTON;
+                    } else if (detected_vk == VK_RBUTTON) {
+                        g_state.target_type = TARGET_TYPE_MOUSE_RIGHT;
+                        g_state.target_vk = VK_RBUTTON;
+                    } else if (detected_vk == VK_MBUTTON) {
+                        g_state.target_type = TARGET_TYPE_MOUSE_MIDDLE;
+                        g_state.target_vk = VK_MBUTTON;
+                    } else if (detected_vk == VK_XBUTTON1) {
+                        g_state.target_type = TARGET_TYPE_MOUSE_X1;
+                        g_state.target_vk = VK_XBUTTON1;
+                    } else if (detected_vk == VK_XBUTTON2) {
+                        g_state.target_type = TARGET_TYPE_MOUSE_X2;
+                        g_state.target_vk = VK_XBUTTON2;
+                    } else {
+                        g_state.target_type = TARGET_TYPE_KEYBOARD;
+                        g_state.target_vk = detected_vk;
+                    }
+                    g_state.is_binding_target = 0;
+                }
+
+                if (g_state.sound_enabled) MessageBeep(MB_OK);
+                if (g_state.hwnd) InvalidateRect(g_state.hwnd, NULL, FALSE);
+                Sleep(220); // debounce key press
+            }
+
+            Sleep(10);
+            continue;
+        }
+
+        // =========================================================
+        // 2. HOTKEY TRIGGER DETECTION
+        // =========================================================
         int hotkey_is_down = (GetAsyncKeyState(g_state.hotkey_vk) & 0x8000) != 0;
 
         if (g_state.hold_mode) {
@@ -157,6 +302,9 @@ static DWORD WINAPI clicker_worker_thread(LPVOID param) {
         }
         hotkey_was_down = hotkey_is_down;
 
+        // =========================================================
+        // 3. LIVE CPS & STATS TICK
+        // =========================================================
         QueryPerformanceCounter(&t_now);
         double elapsed_since_cps = (double)(t_now.QuadPart - t_last_cps_calc.QuadPart) / (double)freq.QuadPart;
         if (elapsed_since_cps >= 0.5) {
@@ -167,6 +315,9 @@ static DWORD WINAPI clicker_worker_thread(LPVOID param) {
             if (g_state.hwnd) InvalidateRect(g_state.hwnd, NULL, FALSE);
         }
 
+        // =========================================================
+        // 4. CLICK DISPATCH (Mouse Button OR Keyboard Key!)
+        // =========================================================
         if (g_state.is_active) {
             double target = g_state.target_cps;
             if (target < 1.0) target = 1.0;
@@ -184,33 +335,65 @@ static DWORD WINAPI clicker_worker_thread(LPVOID param) {
             double elapsed_since_click = (double)(t_now.QuadPart - t_last_click.QuadPart) / (double)freq.QuadPart;
 
             if (elapsed_since_click >= total_delay_sec) {
-                INPUT inputs[2];
-                ZeroMemory(inputs, sizeof(inputs));
-
-                DWORD down_flag = MOUSEEVENTF_LEFTDOWN;
-                DWORD up_flag   = MOUSEEVENTF_LEFTUP;
-
-                if (g_state.button_mode == 1) {
-                    down_flag = MOUSEEVENTF_MIDDLEDOWN;
-                    up_flag   = MOUSEEVENTF_MIDDLEUP;
-                } else if (g_state.button_mode == 2) {
-                    down_flag = MOUSEEVENTF_RIGHTDOWN;
-                    up_flag   = MOUSEEVENTF_RIGHTUP;
-                }
-
-                inputs[0].type = INPUT_MOUSE;
-                inputs[0].mi.dwFlags = down_flag;
-                SendInput(1, &inputs[0], sizeof(INPUT));
-
                 double duty_ratio = (double)g_state.duty_cycle_pct / 100.0;
                 DWORD hold_ms = (DWORD)(total_delay_sec * 1000.0 * duty_ratio);
                 if (hold_ms < 6) hold_ms = 6;
                 if (hold_ms > 40) hold_ms = 40;
-                Sleep(hold_ms);
 
-                inputs[1].type = INPUT_MOUSE;
-                inputs[1].mi.dwFlags = up_flag;
-                SendInput(1, &inputs[1], sizeof(INPUT));
+                if (g_state.target_type == TARGET_TYPE_KEYBOARD) {
+                    // Send Keyboard Key Press
+                    INPUT inputs[2];
+                    ZeroMemory(inputs, sizeof(inputs));
+
+                    inputs[0].type = INPUT_KEYBOARD;
+                    inputs[0].ki.wVk = (WORD)g_state.target_vk;
+                    inputs[0].ki.wScan = (WORD)MapVirtualKeyW(g_state.target_vk, MAPVK_VK_TO_VSC);
+                    SendInput(1, &inputs[0], sizeof(INPUT));
+
+                    Sleep(hold_ms);
+
+                    inputs[1].type = INPUT_KEYBOARD;
+                    inputs[1].ki.wVk = (WORD)g_state.target_vk;
+                    inputs[1].ki.wScan = (WORD)MapVirtualKeyW(g_state.target_vk, MAPVK_VK_TO_VSC);
+                    inputs[1].ki.dwFlags = KEYEVENTF_KEYUP;
+                    SendInput(1, &inputs[1], sizeof(INPUT));
+                } else {
+                    // Send Mouse Button Click
+                    INPUT inputs[2];
+                    ZeroMemory(inputs, sizeof(inputs));
+
+                    DWORD down_flag = MOUSEEVENTF_LEFTDOWN;
+                    DWORD up_flag   = MOUSEEVENTF_LEFTUP;
+                    DWORD m_data    = 0;
+
+                    if (g_state.target_type == TARGET_TYPE_MOUSE_MIDDLE) {
+                        down_flag = MOUSEEVENTF_MIDDLEDOWN;
+                        up_flag   = MOUSEEVENTF_MIDDLEUP;
+                    } else if (g_state.target_type == TARGET_TYPE_MOUSE_RIGHT) {
+                        down_flag = MOUSEEVENTF_RIGHTDOWN;
+                        up_flag   = MOUSEEVENTF_RIGHTUP;
+                    } else if (g_state.target_type == TARGET_TYPE_MOUSE_X1) {
+                        down_flag = MOUSEEVENTF_XDOWN;
+                        up_flag   = MOUSEEVENTF_XUP;
+                        m_data    = XBUTTON1;
+                    } else if (g_state.target_type == TARGET_TYPE_MOUSE_X2) {
+                        down_flag = MOUSEEVENTF_XDOWN;
+                        up_flag   = MOUSEEVENTF_XUP;
+                        m_data    = XBUTTON2;
+                    }
+
+                    inputs[0].type = INPUT_MOUSE;
+                    inputs[0].mi.dwFlags = down_flag;
+                    inputs[0].mi.mouseData = m_data;
+                    SendInput(1, &inputs[0], sizeof(INPUT));
+
+                    Sleep(hold_ms);
+
+                    inputs[1].type = INPUT_MOUSE;
+                    inputs[1].mi.dwFlags = up_flag;
+                    inputs[1].mi.mouseData = m_data;
+                    SendInput(1, &inputs[1], sizeof(INPUT));
+                }
 
                 QueryPerformanceCounter(&t_last_click);
                 g_state.total_clicks++;
@@ -295,10 +478,10 @@ static void on_paint(HWND hwnd) {
         Pen penAccent(colorEmerald, 2.0f);
         Pen penCtrl(colorText, 1.5f);
 
-        // Fill window canvas with rounded corners
+        // Fill window canvas with pure background
         g.FillRectangle(&brushBg, 0, 0, width, height);
 
-        // Typography (Segoe UI) - ClearType GridFit ensures 100% crispness
+        // Typography (Segoe UI)
         FontFamily ffSegoe(L"Segoe UI");
         FontFamily ffSymbol(L"Segoe UI Symbol");
 
@@ -412,17 +595,23 @@ static void on_paint(HWND hwnd) {
         float rateW = c1W - (divX - c1X);
         g.DrawString(L"Rate \u25BE", -1, &fontBody, RectF(divX, row1Y, rateW, cardH), &sfC, &brushText);
 
-        // Card 2: Hotkey & Trigger Group [ F6  ⌨ | Toggle ▾ ]
+        // Card 2: Hotkey & Trigger Group [ Hotkey: ANY KEY / MOUSE | Toggle ▾ ]
         float c2X = c1X + c1W + 12.0f;
         float c2W = (float)width - c2X - 14.0f;
         draw_rounded_card(&g, &brushCardBg, &penBorderSubtle, c2X, row1Y, c2W, cardH, 8.0f);
 
-        // Hotkey Box: [ F6 ]
+        // Hotkey Box (Click to bind ANY key or mouse button!)
         float hkW = 145.0f;
-        wchar_t hkStr[16];
-        swprintf_s(hkStr, 16, L"%S", HOTKEY_NAMES[g_hotkey_idx]);
-        g.DrawString(hkStr, -1, &fontHero, RectF(c2X + 16.0f, row1Y, 60.0f, cardH), &sfL, &brushText);
-        g.DrawString(L"\u2328", -1, &fontSymbol, RectF(c2X + hkW - 34.0f, row1Y, 24.0f, cardH), &sfC, &brushTextSub);
+        if (g_state.is_binding_hotkey) {
+            Pen penPulse(colorEmerald, 1.8f);
+            draw_rounded_card(&g, &brushCardBg, &penPulse, c2X + 4.0f, row1Y + 4.0f, hkW - 8.0f, cardH - 8.0f, 6.0f);
+            g.DrawString(L"[PRESS KEY]", -1, &fontBody, RectF(c2X, row1Y, hkW, cardH), &sfC, &brushEmerald);
+        } else {
+            wchar_t hkStr[32];
+            get_vk_name(g_state.hotkey_vk, hkStr, 32);
+            g.DrawString(hkStr, -1, &fontHero, RectF(c2X + 16.0f, row1Y, 80.0f, cardH), &sfL, &brushText);
+            g.DrawString(L"\u2328", -1, &fontSymbol, RectF(c2X + hkW - 34.0f, row1Y, 24.0f, cardH), &sfC, &brushTextSub);
+        }
 
         float div2X = c2X + hkW;
         g.DrawLine(&penBorderSubtle, div2X, row1Y + 8.0f, div2X, row1Y + cardH - 8.0f);
@@ -435,51 +624,69 @@ static void on_paint(HWND hwnd) {
         // --- 3. ROW 2 (BOTTOM CARD ROW) ---
         float row2Y = row1Y + cardH + 12.0f;
 
-        // Card 3: Button Selector [ 🖱 | ⌨ | LEFT | MIDDLE | RIGHT ]
+        // Card 3: Button / Key Selector [ 🖱 / ⌨ | LEFT | RIGHT | CHOOSE: <Key> ]
         float c3X = 14.0f;
         float c3W = 270.0f;
         draw_rounded_card(&g, &brushCardBg, &penBorderSubtle, c3X, row2Y, c3W, cardH, 8.0f);
 
-        // Mouse Mode Pill (Active)
-        float mPillX = c3X + 8.0f;
+        // Left Mode Pill (Shows 🖱 for mouse click or ⌨ for key typing)
+        float mPillX = c3X + 6.0f;
         float mPillY = row2Y + 8.0f;
-        float mPillW = 32.0f;
+        float mPillW = 28.0f;
         float mPillH = cardH - 16.0f;
         fill_rounded_card(&g, &brushInactPill, mPillX, mPillY, mPillW, mPillH, 6.0f);
-        // Small mouse icon
-        Pen mSmallPen(colorText, 1.2f);
-        g.DrawArc(&mSmallPen, mPillX + 10.0f, mPillY + 7.0f, 12.0f, 16.0f, 0.0f, 360.0f);
-        g.DrawLine(&mSmallPen, mPillX + 16.0f, mPillY + 7.0f, mPillX + 16.0f, mPillY + 12.0f);
 
-        // Keyboard Mode Pill
-        float kPillX = mPillX + mPillW + 4.0f;
-        g.DrawString(L"\u2328", -1, &fontSymbol, RectF(kPillX, mPillY, mPillW, mPillH), &sfC, &brushTextSub);
+        if (g_state.target_type == TARGET_TYPE_KEYBOARD) {
+            g.DrawString(L"\u2328", -1, &fontSymbol, RectF(mPillX, mPillY, mPillW, mPillH), &sfC, &brushText);
+        } else {
+            Pen mSmallPen(colorText, 1.2f);
+            g.DrawArc(&mSmallPen, mPillX + 8.0f, mPillY + 7.0f, 12.0f, 16.0f, 0.0f, 360.0f);
+            g.DrawLine(&mSmallPen, mPillX + 14.0f, mPillY + 7.0f, mPillX + 14.0f, mPillY + 12.0f);
+        }
 
         // Divider
-        float div3X = kPillX + mPillW + 6.0f;
+        float div3X = mPillX + mPillW + 6.0f;
         g.DrawLine(&penBorderSubtle, div3X, row2Y + 8.0f, div3X, row2Y + cardH - 8.0f);
 
-        // Segmented Buttons: LEFT | MIDDLE | RIGHT
-        float segBtnW = 54.0f;
-        float btnLeftX = div3X + 8.0f;
-        float btnMidX  = btnLeftX + segBtnW + 2.0f;
-        float btnRightX = btnMidX + segBtnW + 2.0f;
+        // Segmented Buttons: LEFT | RIGHT | CHOOSE
+        float btnLeftX = div3X + 6.0f;
+        float btnLeftW = 46.0f;
+        float btnRightX = btnLeftX + btnLeftW + 4.0f;
+        float btnRightW = 46.0f;
+        float btnChooseX = btnRightX + btnRightW + 4.0f;
+        float btnChooseW = c3X + c3W - btnChooseX - 6.0f;
 
-        if (g_state.button_mode == 0) {
-            fill_rounded_card(&g, &brushActivePill, btnLeftX, mPillY, segBtnW, mPillH, 6.0f);
-            g.DrawString(L"LEFT", -1, &fontMicro, RectF(btnLeftX, mPillY, segBtnW, mPillH), &sfC, &brushActiveText);
-            g.DrawString(L"MIDDLE", -1, &fontMicro, RectF(btnMidX, mPillY, segBtnW, mPillH), &sfC, &brushTextSub);
-            g.DrawString(L"RIGHT", -1, &fontMicro, RectF(btnRightX, mPillY, segBtnW, mPillH), &sfC, &brushTextSub);
-        } else if (g_state.button_mode == 1) {
-            fill_rounded_card(&g, &brushActivePill, btnMidX, mPillY, segBtnW, mPillH, 6.0f);
-            g.DrawString(L"LEFT", -1, &fontMicro, RectF(btnLeftX, mPillY, segBtnW, mPillH), &sfC, &brushTextSub);
-            g.DrawString(L"MIDDLE", -1, &fontMicro, RectF(btnMidX, mPillY, segBtnW, mPillH), &sfC, &brushActiveText);
-            g.DrawString(L"RIGHT", -1, &fontMicro, RectF(btnRightX, mPillY, segBtnW, mPillH), &sfC, &brushTextSub);
+        // LEFT Quick Preset
+        if (g_state.target_type == TARGET_TYPE_MOUSE_LEFT) {
+            fill_rounded_card(&g, &brushActivePill, btnLeftX, mPillY, btnLeftW, mPillH, 6.0f);
+            g.DrawString(L"LEFT", -1, &fontMicro, RectF(btnLeftX, mPillY, btnLeftW, mPillH), &sfC, &brushActiveText);
         } else {
-            fill_rounded_card(&g, &brushActivePill, btnRightX, mPillY, segBtnW, mPillH, 6.0f);
-            g.DrawString(L"LEFT", -1, &fontMicro, RectF(btnLeftX, mPillY, segBtnW, mPillH), &sfC, &brushTextSub);
-            g.DrawString(L"MIDDLE", -1, &fontMicro, RectF(btnMidX, mPillY, segBtnW, mPillH), &sfC, &brushTextSub);
-            g.DrawString(L"RIGHT", -1, &fontMicro, RectF(btnRightX, mPillY, segBtnW, mPillH), &sfC, &brushActiveText);
+            g.DrawString(L"LEFT", -1, &fontMicro, RectF(btnLeftX, mPillY, btnLeftW, mPillH), &sfC, &brushTextSub);
+        }
+
+        // RIGHT Quick Preset
+        if (g_state.target_type == TARGET_TYPE_MOUSE_RIGHT) {
+            fill_rounded_card(&g, &brushActivePill, btnRightX, mPillY, btnRightW, mPillH, 6.0f);
+            g.DrawString(L"RIGHT", -1, &fontMicro, RectF(btnRightX, mPillY, btnRightW, mPillH), &sfC, &brushActiveText);
+        } else {
+            g.DrawString(L"RIGHT", -1, &fontMicro, RectF(btnRightX, mPillY, btnRightW, mPillH), &sfC, &brushTextSub);
+        }
+
+        // CHOOSE / TARGET BIND BUTTON (Allows choosing ANY key or mouse button!)
+        if (g_state.is_binding_target) {
+            Pen penPulse(colorEmerald, 1.8f);
+            draw_rounded_card(&g, &brushCardBg, &penPulse, btnChooseX, mPillY, btnChooseW, mPillH, 6.0f);
+            g.DrawString(L"[PRESS]", -1, &fontMicro, RectF(btnChooseX, mPillY, btnChooseW, mPillH), &sfC, &brushEmerald);
+        } else {
+            int isCustomActive = (g_state.target_type != TARGET_TYPE_MOUSE_LEFT && g_state.target_type != TARGET_TYPE_MOUSE_RIGHT);
+            if (isCustomActive) {
+                fill_rounded_card(&g, &brushActivePill, btnChooseX, mPillY, btnChooseW, mPillH, 6.0f);
+            }
+            wchar_t targetName[32];
+            get_vk_name(g_state.target_vk, targetName, 32);
+            wchar_t chooseLabel[48];
+            swprintf_s(chooseLabel, 48, L"%s \u25BE", targetName);
+            g.DrawString(chooseLabel, -1, &fontMicro, RectF(btnChooseX, mPillY, btnChooseW, mPillH), &sfC, isCustomActive ? &brushActiveText : &brushTextSub);
         }
 
         // Card 4: Duty Cycle [ Duty Cycle | 45 % ]
@@ -532,12 +739,20 @@ static void on_paint(HWND hwnd) {
         g.DrawArc(&penAccent, footTextX + 9.0f, footY + 7.0f, 6.0f, 10.0f, -60.0f, 120.0f);
 
         wchar_t footBuf[128];
-        if (g_state.is_active) {
+        if (g_state.is_binding_hotkey) {
+            swprintf_s(footBuf, 128, L"Press ANY keyboard key or mouse button to set hotkey (or ESC to cancel)...");
+        } else if (g_state.is_binding_target) {
+            swprintf_s(footBuf, 128, L"Press ANY keyboard key or mouse button to set click target (or ESC to cancel)...");
+        } else if (g_state.is_active) {
             swprintf_s(footBuf, 128, L"ACTIVE · %lld clicks · %.1f Live CPS (prmtz engine < 3.2 MB)",
                 g_state.total_clicks, g_state.current_live_cps);
         } else {
-            swprintf_s(footBuf, 128, L"Audio: %s · prmtz engine (< 3.2 MB RAM) · Target: %.0f CPS",
-                g_state.sound_enabled ? L"ON" : L"MUTE", g_state.target_cps);
+            wchar_t tName[32];
+            get_vk_name(g_state.target_vk, tName, 32);
+            wchar_t hName[32];
+            get_vk_name(g_state.hotkey_vk, hName, 32);
+            swprintf_s(footBuf, 128, L"Target: %s · Hotkey: [%s] · Audio: %s · Target: %.0f CPS",
+                tName, hName, g_state.sound_enabled ? L"ON" : L"MUTE", g_state.target_cps);
         }
         g.DrawString(footBuf, -1, &fontSmall, RectF(footTextX + 22.0f, footY, 380.0f, 24.0f), &sfL, &brushTextSub);
 
@@ -632,10 +847,13 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             return 0;
         }
 
-        // 6. Hotkey Box -> Click cycles hotkeys (F6, X, C, V, M4)
+        // 6. Hotkey Box -> Click activates Bind Mode for ANY key or mouse button!
         if (PtInRect(&g_rect_hotkey_box, pt)) {
-            g_hotkey_idx = (g_hotkey_idx + 1) % HOTKEY_COUNT;
-            g_state.hotkey_vk = HOTKEY_VKS[g_hotkey_idx];
+            g_state.is_active = 0; // stop clicking while binding
+            g_state.is_binding_target = 0;
+            g_state.is_binding_hotkey = 1;
+            g_binding_ignore_vk = VK_LBUTTON;
+            g_binding_wait_release = 1;
             InvalidateRect(hwnd, NULL, FALSE);
             return 0;
         }
@@ -647,23 +865,31 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             return 0;
         }
 
-        // 8. Button Mode: LEFT
+        // 8. Target Mode Quick Button: LEFT
         if (PtInRect(&g_rect_btn_left, pt)) {
-            g_state.button_mode = 0;
+            g_state.target_type = TARGET_TYPE_MOUSE_LEFT;
+            g_state.target_vk = VK_LBUTTON;
+            g_state.is_binding_target = 0;
             InvalidateRect(hwnd, NULL, FALSE);
             return 0;
         }
 
-        // 9. Button Mode: MIDDLE
-        if (PtInRect(&g_rect_btn_mid, pt)) {
-            g_state.button_mode = 1;
-            InvalidateRect(hwnd, NULL, FALSE);
-            return 0;
-        }
-
-        // 10. Button Mode: RIGHT
+        // 9. Target Mode Quick Button: RIGHT
         if (PtInRect(&g_rect_btn_right, pt)) {
-            g_state.button_mode = 2;
+            g_state.target_type = TARGET_TYPE_MOUSE_RIGHT;
+            g_state.target_vk = VK_RBUTTON;
+            g_state.is_binding_target = 0;
+            InvalidateRect(hwnd, NULL, FALSE);
+            return 0;
+        }
+
+        // 10. Target Mode Custom Box -> Click activates Bind Mode for ANY key or mouse button!
+        if (PtInRect(&g_rect_target_box, pt) || PtInRect(&g_rect_mode_icon, pt)) {
+            g_state.is_active = 0; // stop clicking while binding
+            g_state.is_binding_hotkey = 0;
+            g_state.is_binding_target = 1;
+            g_binding_ignore_vk = VK_LBUTTON;
+            g_binding_wait_release = 1;
             InvalidateRect(hwnd, NULL, FALSE);
             return 0;
         }
