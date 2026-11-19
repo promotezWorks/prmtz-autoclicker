@@ -2,15 +2,15 @@
 
 # promotezz autoclicker
 
-A sleek, zero-overhead Win32 autoclicker built for competitive gaming. Runs at under 2 MB RAM with humanized Gaussian click pacing.
+A modern, zero-overhead systems autoclicker engineered for competitive performance and low latency. Built in the Goose systems language with a native hardware-antialiased client interface.
 
 <br />
 
-<img src="assets/preview.png" alt="promotezz autoclicker" width="720" />
+<img src="assets/clicker-preview.png" alt="promotezz autoclicker" width="760" />
 
 <br />
 
-[![RAM Footprint](https://img.shields.io/badge/RAM-%3C%202%20MB-10b981?style=flat-square)](https://store.promotezz.cc)
+[![RAM Footprint](https://img.shields.io/badge/RAM-%3C%203.2%20MB-10b981?style=flat-square)](https://store.promotezz.cc)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-black?style=flat-square)](https://promotezz.cc)
 [![Speed](https://img.shields.io/badge/Speed-6--24%20CPS-blue?style=flat-square)](https://store.promotezz.cc)
 [![License](https://img.shields.io/badge/License-MIT-white?style=flat-square)](https://opensource.org/licenses/MIT)
@@ -21,37 +21,40 @@ A sleek, zero-overhead Win32 autoclicker built for competitive gaming. Runs at u
 
 ## Features
 
-- ⚡ **Sub-Millisecond Win32 Dispatch** — Uses low-level `SendInput` event generation and high-resolution hardware clocks for immediate, lag-free response.
-- 🎯 **Smooth 6.0 – 24.0 CPS Control** — Real-time slider lets you dial in the exact speed you want on the fly.
-- 🧠 **Humanized Gaussian Jitter** — Natural interval randomization (Box-Muller distribution) prevents static machine click patterns.
-- 🪶 **Under 2 MB Memory Footprint** — Extremely lightweight native binary that won't take resources away from your games.
-- ⌨️ **Configurable Global Hotkey** — Toggle on and off anywhere with `F6` (or switch to `X`, `C`, `V`, `Mouse 4`).
-- 🔔 **Discrete Audio & Dynamic Island LED** — Clean status indicator and optional toggle chime.
-- 🛡️ **Zero Setup Required** — Standalone portable `.exe`, no runtimes or background services needed.
+- ⚡ **Sub-Millisecond Win32 Engine** — Bare-metal `SendInput` event streaming with hardware clock resolution (`timeBeginPeriod(1)`).
+- 🎯 **Smooth 6.0 – 24.0 CPS Control** — Real-time slider with floating thumb and glowing speed badge.
+- 🖱️ **Left & Right Click Modes** — Dedicated segmented selector to toggle between primary weapon attack and secondary block/place clicks.
+- 🕹️ **Trigger Modes (Toggle / Hold)** — Choose between press-to-toggle or hold-to-click activation.
+- 🧠 **Gaussian Humanizer** — Box-Muller interval distribution simulates human muscle latency to prevent static pattern detection.
+- ⏸️ **Inventory Safeguard** — Auto-pauses clicking when navigating containers, menus, or chat.
+- 🪶 **Under 3.2 MB RAM** — Zero-heap stack-allocated Goose runtime with zero Electron/Chromium bloat.
+- ⌨️ **Configurable Global Hotkey** — Toggle on and off anywhere with `F6`, `X`, `C`, `V`, or `Mouse 4`.
+- 🔔 **Discrete Audio Cues** — Subtle mechanical toggle feedback or complete silent operation.
 
 ---
 
 ## How to Use
 
-1. Launch `prmtz-autoclicker.exe`.
-2. Set your target click speed with the slider (e.g. `14.0 CPS`).
-3. Press **`F6`** (or your selected hotkey) to start or pause clicking.
+1. Run `prmtz-autoclicker.exe`.
+2. Configure your desired CPS, click button (Left/Right), and trigger type (Toggle/Hold).
+3. Press **`F6`** (or your bound key) to start clicking.
 
 ### Controls
 
-| Action | Control |
+| Option | Description |
 | :--- | :--- |
-| **Start / Stop** | Press `F6` (or click the main button) |
-| **Speed** | Drag slider between `6.0` and `24.0 CPS` |
-| **Change Hotkey** | Click key pill to cycle `F6` → `X` → `C` → `V` → `Mouse 4` |
-| **Mute Chime** | Click `Audio: ON / MUTE` |
-| **Toggle Jitter** | Click `Gaussian Jitter` to switch between humanized and fixed delay |
+| **Click Speed** | Drag the slider between `6.0` and `24.0 CPS` |
+| **Click Button** | Switch between `Left` and `Right` mouse buttons |
+| **Trigger Type** | Switch between `Toggle` (press once) and `Hold` (hold down) |
+| **Gaussian Jitter** | Turn on humanized interval variance |
+| **Click Audio** | Enable or mute audio toggle chimes |
+| **Hotkey Bind** | Click to cycle bind key: `F6` → `X` → `C` → `V` → `Mouse 4` |
 
 ---
 
 ## Download
 
-Get the standalone executable directly from **[store.promotezz.cc](https://store.promotezz.cc)** or the GitHub Releases page.
+Download the standalone executable directly from **[store.promotezz.cc](https://store.promotezz.cc)**.
 
 ---
 
